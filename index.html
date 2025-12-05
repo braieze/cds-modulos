@@ -42,7 +42,7 @@
         .animate-enter { animation: enter 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes enter { from { opacity: 0; transform: translateY(10px) scale(0.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
         
-        /* Compatibilidad para vistas antiguas hasta que las actualicemos */
+        /* Compatibilidad */
         .input-modern { @apply w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-all shadow-input outline-none; }
         .label-modern { @apply block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1; }
     </style>
@@ -157,7 +157,6 @@
             if (loadingAuth) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse">Cargando sistema...</div>;
             if (!currentUser || !userProfile) return <LoginScreen onLogin={handleLogin} loading={loadingAuth} error={authError} />;
 
-            // Ítem de Navegación Nuevo
             const NavItem = ({ id, label, icon }) => (
                 <button onClick={() => { setActiveTab(id); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all mb-1 ${activeTab === id ? 'bg-brand-50 text-brand-600 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
                     <Icon name={icon} /> {label}
@@ -166,7 +165,7 @@
 
             return (
                 <div className="flex h-screen bg-slate-50 overflow-hidden text-slate-900 font-sans">
-                    {/* SIDEBAR MODERNO */}
+                    {/* SIDEBAR */}
                     <aside className={`fixed inset-y-0 left-0 z-40 w-72 bg-white border-r border-slate-100 transform transition-transform duration-300 md:relative md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                         <div className="p-6 flex flex-col h-full">
                             <div className="flex items-center gap-3 mb-8">
@@ -213,14 +212,18 @@
                         <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24">
                             <div className="max-w-6xl mx-auto h-full">
                                 {activeTab === 'dashboard' && <Dashboard userProfile={userProfile} worship={worship} servers={servers} tasks={tasks} messages={messages} updateData={updateData} setActiveTab={setActiveTab} />}
-                                {activeTab === 'members' && <Directory members={members} addData={addData} updateData={updateData} />}
+                                {activeTab === 'members' && <Directory members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
                                 {activeTab === 'worship' && <Worship worship={worship} songs={songs} members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
-                                {activeTab === 'finances' && <Finances finances={finances} addData={addData} />}
+                                
+                                {/* AQUÍ ESTÁ LA CORRECCIÓN: pasamos userProfile */}
+                                {activeTab === 'finances' && <Finances finances={finances} addData={addData} userProfile={userProfile} />}
+                                
                                 {activeTab === 'ebd' && <MinistryWithTasks title="Escuela Bíblica" col="ebd" filterMinistry="EBD" members={members} tasks={tasks} events={ebd} addData={addData} deleteData={deleteData} />}
                                 {activeTab === 'youth' && <MinistryWithTasks title="Jóvenes" col="youth" filterMinistry="Jóvenes" members={members} tasks={tasks} events={youth} addData={addData} deleteData={deleteData} />}
                                 {activeTab === 'calendar' && <GlobalCalendar worship={worship} youth={youth} ebd={ebd} servers={servers} tasks={tasks} />}
                                 {activeTab === 'messages' && <Messaging messages={messages} members={members} userProfile={userProfile} addData={addData} updateData={updateData} />}
                                 
+                                {/* Módulo Servidores usando el componente genérico */}
                                 {activeTab === 'servers' && (
                                     <MinistryWithTasks 
                                         title="Cuerpo de Servidores" 
