@@ -12,8 +12,6 @@
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-    <script type="text/babel" src="src/views/MinistryWithTasks.js"></script>
-    <script type="text/babel" src="src/views/Messaging.js"></script>
 
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <script>
@@ -39,33 +37,26 @@
     <script type="text/babel" src="src/views/Finances.js"></script>
     <script type="text/babel" src="src/views/Worship.js"></script>
     <script type="text/babel" src="src/views/MinistryWithTasks.js"></script>
+    <script type="text/babel" src="src/views/Messaging.js"></script>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        // Inicializar Firebase
-        const firebaseConfig = {
-            apiKey: "AIzaSyDXK_EcXsFGhRmXfkKG8SMdsM69c4PNfHw",
-            authDomain: "conquistadoresapp.firebaseapp.com",
-            projectId: "conquistadoresapp",
-            storageBucket: "conquistadoresapp.firebasestorage.app",
-            messagingSenderId: "518647225464",
-            appId: "1:518647225464:web:b3344ca5172498187e218d"
-        };
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        // --- YA NO CONFIGURAMOS FIREBASE AQUÍ ---
+        // La configuración ahora ocurre automáticamente al importar src/DataLogic.js
 
         const { useState, useEffect } = React;
-        const auth = firebase.auth();
-        const googleProvider = new firebase.auth.GoogleAuthProvider();
-        const db = firebase.firestore();
+        const db = firebase.firestore(); // Podemos llamarlo porque DataLogic ya lo inicializó
 
         // Importar desde el objeto global
         const { Icon, Card, Button } = window.Utils;
-        const { useFirebaseListeners, addData, updateData, deleteData } = window.DataLogic;
+        
+        // Importar Auth y Logica desde DataLogic
+        const { useFirebaseListeners, addData, updateData, deleteData, auth, googleProvider } = window.DataLogic;
         
         // Importar Vistas
-        const { Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging } = window.Views; // <-- Agrega Messaging aquí
+        const { Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging } = window.Views;
 
         // Login Component
         const LoginScreen = ({ onLogin, loading, error }) => (
@@ -100,6 +91,7 @@
 
             // Autenticación
             useEffect(() => {
+                // Usamos 'auth' que viene de window.DataLogic
                 const unsubscribe = auth.onAuthStateChanged(async (user) => {
                     if (user) {
                         setCurrentUser(user);
@@ -182,19 +174,14 @@
                             {activeTab === 'ebd' && <MinistryWithTasks title="Escuela Bíblica" col="ebd" filterMinistry="EBD" members={members} tasks={tasks} events={ebd} addData={addData} deleteData={deleteData} />}
                             {activeTab === 'youth' && <MinistryWithTasks title="Jóvenes" col="youth" filterMinistry="Jóvenes" members={members} tasks={tasks} events={youth} addData={addData} deleteData={deleteData} />}
                             
-                            {/* AQUÍ ESTA EL CALENDARIO ARREGLADO */}
+                            {/* CALENDARIO */}
                             {activeTab === 'calendar' && (
                                 <GlobalCalendar worship={worship} youth={youth} ebd={ebd} servers={servers} tasks={tasks} />
                             )}
                             
+                            {/* MENSAJERÍA */}
                             {activeTab === 'messages' && (
-                                <Messaging 
-                                    messages={messages} 
-                                    members={members} 
-                                    userProfile={userProfile} 
-                                    addData={addData} 
-                                    updateData={updateData} 
-                                />
+                                <Messaging messages={messages} members={members} userProfile={userProfile} addData={addData} updateData={updateData} />
                             )}
                         </div>
                     </main>
