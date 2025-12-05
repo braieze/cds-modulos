@@ -28,6 +28,26 @@
         .label-modern { @apply block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5; }
     </style>
 
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyDXK_EcXsFGhRmXfkKG8SMdsM69c4PNfHw",
+            authDomain: "conquistadoresapp.firebaseapp.com",
+            projectId: "conquistadoresapp",
+            storageBucket: "conquistadoresapp.firebasestorage.app",
+            messagingSenderId: "518647225464",
+            appId: "1:518647225464:web:b3344ca5172498187e218d"
+        };
+        
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        
+        // Exponer variables globales para que los módulos las usen
+        window.db = firebase.firestore();
+        window.auth = firebase.auth();
+        window.googleProvider = new firebase.auth.GoogleAuthProvider();
+    </script>
+
     <script type="text/babel" src="src/Utils.js"></script>
     <script type="text/babel" src="src/DataLogic.js"></script>
     
@@ -43,17 +63,13 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        // --- YA NO CONFIGURAMOS FIREBASE AQUÍ ---
-        // La configuración ahora ocurre automáticamente al importar src/DataLogic.js
-
         const { useState, useEffect } = React;
-        const db = firebase.firestore(); // Podemos llamarlo porque DataLogic ya lo inicializó
-
+        
         // Importar desde el objeto global
         const { Icon, Card, Button } = window.Utils;
         
-        // Importar Auth y Logica desde DataLogic
-        const { useFirebaseListeners, addData, updateData, deleteData, auth, googleProvider } = window.DataLogic;
+        // Importar Lógica desde DataLogic
+        const { useFirebaseListeners, addData, updateData, deleteData } = window.DataLogic;
         
         // Importar Vistas
         const { Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging } = window.Views;
@@ -91,19 +107,18 @@
 
             // Autenticación
             useEffect(() => {
-                // Usamos 'auth' que viene de window.DataLogic
-                const unsubscribe = auth.onAuthStateChanged(async (user) => {
+                const unsubscribe = window.auth.onAuthStateChanged(async (user) => {
                     if (user) {
                         setCurrentUser(user);
-                        const q = db.collection('members').where('email', '==', user.email);
+                        const q = window.db.collection('members').where('email', '==', user.email);
                         const snapshot = await q.get();
                         if (!snapshot.empty) {
                             setUserProfile({ ...snapshot.docs[0].data(), id: snapshot.docs[0].id });
                         } else {
-                            const checkEmpty = await db.collection('members').get();
+                            const checkEmpty = await window.db.collection('members').get();
                             if(checkEmpty.empty) {
                                 const newAdmin = { name: user.displayName, email: user.email, role: 'Pastor', ministry: 'Pastoral', photo: user.photoURL, status: 'Activo' };
-                                await db.collection('members').add(newAdmin);
+                                await window.db.collection('members').add(newAdmin);
                                 setUserProfile(newAdmin);
                             } else {
                                 setUserProfile(null); setAuthError("Tu email no está registrado.");
@@ -115,14 +130,14 @@
                 return () => unsubscribe();
             }, []);
 
-            // Cargar Datos (usando el Hook de DataLogic)
+            // Cargar Datos
             useFirebaseListeners(userProfile, {
                 members: setMembers, finances: setFinances, worship: setWorship, songs: setSongs,
                 ebd: setEbd, youth: setYouth, tasks: setTasks, servers: setServers, messages: setMessages
             });
 
-            const handleLogin = async () => { try { await auth.signInWithPopup(googleProvider); } catch(e) { setAuthError("Error Google"); } };
-            const handleLogout = () => auth.signOut();
+            const handleLogin = async () => { try { await window.auth.signInWithPopup(window.googleProvider); } catch(e) { setAuthError("Error Google"); } };
+            const handleLogout = () => window.auth.signOut();
 
             if (loadingAuth) return <div className="min-h-screen flex items-center justify-center text-slate-500">Cargando sistema...</div>;
             if (!currentUser || !userProfile) return <LoginScreen onLogin={handleLogin} loading={loadingAuth} error={authError} />;
@@ -174,15 +189,9 @@
                             {activeTab === 'ebd' && <MinistryWithTasks title="Escuela Bíblica" col="ebd" filterMinistry="EBD" members={members} tasks={tasks} events={ebd} addData={addData} deleteData={deleteData} />}
                             {activeTab === 'youth' && <MinistryWithTasks title="Jóvenes" col="youth" filterMinistry="Jóvenes" members={members} tasks={tasks} events={youth} addData={addData} deleteData={deleteData} />}
                             
-                            {/* CALENDARIO */}
-                            {activeTab === 'calendar' && (
-                                <GlobalCalendar worship={worship} youth={youth} ebd={ebd} servers={servers} tasks={tasks} />
-                            )}
+                            {activeTab === 'calendar' && <GlobalCalendar worship={worship} youth={youth} ebd={ebd} servers={servers} tasks={tasks} />}
                             
-                            {/* MENSAJERÍA */}
-                            {activeTab === 'messages' && (
-                                <Messaging messages={messages} members={members} userProfile={userProfile} addData={addData} updateData={updateData} />
-                            )}
+                            {activeTab === 'messages' && <Messaging messages={messages} members={members} userProfile={userProfile} addData={addData} updateData={updateData} />}
                         </div>
                     </main>
                     {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setSidebarOpen(false)}></div>}
