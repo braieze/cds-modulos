@@ -221,11 +221,18 @@
                                 {activeTab === 'calendar' && <GlobalCalendar worship={worship} youth={youth} ebd={ebd} servers={servers} tasks={tasks} />}
                                 {activeTab === 'messages' && <Messaging messages={messages} members={members} userProfile={userProfile} addData={addData} updateData={updateData} />}
                                 
-                                {/* Si necesitas implementar 'servers' como MinistryWithTasks o un componente específico, ajusta aquí */}
                                 {activeTab === 'servers' && (
-                                     <div className="text-center py-10 text-slate-500">
-                                         <p>Módulo de Servidores en construcción (Fase siguiente).</p>
-                                     </div>
+                                    <MinistryWithTasks 
+                                        title="Cuerpo de Servidores" 
+                                        col="servers" 
+                                        filterMinistry="Servidores" 
+                                        members={members} 
+                                        tasks={tasks} 
+                                        events={servers} 
+                                        addData={addData} 
+                                        deleteData={deleteData} 
+                                        updateData={updateData}
+                                    />
                                 )}
                             </div>
                         </div>
