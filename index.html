@@ -5,23 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Conquistadores App - Sistema Integral</title>
     
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700&display=swap" rel="stylesheet">
     
     <script>
         tailwind.config = {
             theme: {
                 extend: {
-                    fontFamily: { sans: ['"Plus Jakarta Sans"', 'sans-serif'] },
+                    fontFamily: { 
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        serif: ['"Merriweather"', 'serif'] 
+                    },
                     colors: {
                         brand: { 50:'#eff6ff', 100:'#dbeafe', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8', 900:'#1e3a8a' },
                         accent: { 500: '#f59e0b', 600: '#d97706' }, 
@@ -73,30 +81,38 @@
         window.db = firebase.firestore();
         window.auth = firebase.auth();
         window.googleProvider = new firebase.auth.GoogleAuthProvider();
+
+        // Registro Service Worker PWA
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./service-worker.js')
+                    .then(reg => console.log('SW registrado', reg))
+                    .catch(err => console.log('SW fallo', err));
+            });
+        }
     </script>
 
     <script type="text/babel" src="src/Utils.js"></script>
     <script type="text/babel" src="src/DataLogic.js"></script>
     
     <script type="text/babel" src="src/views/GlobalCalendar.js"></script>
-    <script type="text/babel" src="src/views/Dashboard.js"></script>
+    <script type="text/babel" src="src/views/EventDetails.js"></script> <script type="text/babel" src="src/views/Dashboard.js"></script>
     <script type="text/babel" src="src/views/Directory.js"></script>
     <script type="text/babel" src="src/views/Finances.js"></script>
     <script type="text/babel" src="src/views/Worship.js"></script>
     <script type="text/babel" src="src/views/MinistryWithTasks.js"></script>
     <script type="text/babel" src="src/views/Messaging.js"></script>
-    <script type="text/babel" src="src/views/EventDetails.js"></script>
-</head>
+    <script type="text/babel" src="src/views/Blog.js"></script> </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
-        const { Icon, Button, ToastContainer } = window.Utils; // Importamos ToastContainer
+        const { Icon, Button, ToastContainer } = window.Utils;
         const { useFirebaseListeners, addData, updateData, deleteData } = window.DataLogic;
         
         // Importamos Vistas
-        const { Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging } = window.Views;
+        const { Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging, Blog } = window.Views;
 
         // Login Screen
         const LoginScreen = ({ onLogin, loading, error }) => (
@@ -123,7 +139,7 @@
             const [activeTab, setActiveTab] = useState('dashboard');
             const [sidebarOpen, setSidebarOpen] = useState(false);
 
-            // Datos
+            // Datos (Estados)
             const [members, setMembers] = useState([]);
             const [finances, setFinances] = useState([]);
             const [worship, setWorship] = useState([]);
@@ -178,7 +194,6 @@
 
             return (
                 <div className="flex h-screen bg-slate-50 overflow-hidden text-slate-900 font-sans">
-                    {/* TOAST CONTAINER GLOBAL (Notificaciones) */}
                     <ToastContainer />
 
                     {/* SIDEBAR */}
@@ -192,11 +207,12 @@
                             <nav className="space-y-1 flex-1 overflow-y-auto hide-scroll">
                                 <NavItem id="dashboard" icon="Home" label="Inicio" />
                                 <NavItem id="calendar" icon="Calendar" label="Calendario" />
+                                <NavItem id="blog" icon="Book" label="Devocionales" /> {/* NUEVO ITEM */}
                                 
                                 <div className="mt-6 mb-2 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Ministerios</div>
                                 {(userProfile.role === 'Pastor' || userProfile.ministry === 'Alabanza') && <NavItem id="worship" icon="Music" label="Alabanza" />}
                                 {(userProfile.role === 'Pastor' || userProfile.ministry === 'Servidores' || userProfile.ministry === 'General') && <NavItem id="servers" icon="Hand" label="Servidores" />}
-                                {(userProfile.role === 'Pastor' || userProfile.ministry === 'EBD') && <NavItem id="ebd" icon="Book" label="Escuela Bíblica" />}
+                                {(userProfile.role === 'Pastor' || userProfile.ministry === 'EBD') && <NavItem id="ebd" icon="BookOpen" label="Escuela Bíblica" />}
                                 {(userProfile.role === 'Pastor' || userProfile.ministry === 'Jóvenes') && <NavItem id="youth" icon="Smile" label="Jóvenes" />}
                                 
                                 <div className="mt-6 mb-2 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Gestión</div>
@@ -227,7 +243,7 @@
                         
                         <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24">
                             <div className="max-w-6xl mx-auto h-full">
-                                {activeTab === 'dashboard' && <Dashboard userProfile={userProfile} worship={worship} servers={servers} tasks={tasks} messages={messages} updateData={updateData} setActiveTab={setActiveTab} />}
+                                {activeTab === 'dashboard' && <Dashboard userProfile={userProfile} worship={worship} servers={servers} tasks={tasks} messages={messages} ebd={ebd} youth={youth} updateData={updateData} setActiveTab={setActiveTab} />}
                                 {activeTab === 'members' && <Directory members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
                                 {activeTab === 'worship' && <Worship worship={worship} songs={songs} members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
                                 {activeTab === 'finances' && <Finances finances={finances} addData={addData} userProfile={userProfile} />}
@@ -235,6 +251,7 @@
                                 {activeTab === 'youth' && <MinistryWithTasks title="Jóvenes" col="youth" filterMinistry="Jóvenes" members={members} tasks={tasks} events={youth} addData={addData} deleteData={deleteData} />}
                                 {activeTab === 'calendar' && <GlobalCalendar worship={worship} youth={youth} ebd={ebd} servers={servers} tasks={tasks} />}
                                 {activeTab === 'messages' && <Messaging messages={messages} members={members} userProfile={userProfile} addData={addData} updateData={updateData} />}
+                                {activeTab === 'blog' && <Blog userProfile={userProfile} addData={addData} deleteData={deleteData} />}
                                 
                                 {activeTab === 'servers' && (
                                     <MinistryWithTasks 
