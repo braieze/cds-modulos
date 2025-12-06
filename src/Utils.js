@@ -2,7 +2,7 @@
 window.Utils = {};
 
 // ==========================================
-// 1. SISTEMA DE ICONOS (Completo)
+// 1. SISTEMA DE ICONOS
 // ==========================================
 window.Utils.Icon = ({ name, size = 20, className = "" }) => {
     const icons = {
@@ -19,8 +19,6 @@ window.Utils.Icon = ({ name, size = 20, className = "" }) => {
         Search: <React.Fragment><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></React.Fragment>,
         Check: <polyline points="20 6 9 17 4 12"/>,
         AlertCircle: <React.Fragment><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></React.Fragment>,
-        
-        // Ministerios
         Users: <React.Fragment><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></React.Fragment>,
         Wallet: <React.Fragment><path d="M20 12V8H6a2 2 0 0 1 0-4h14v4"/><path d="M4 6v12a2 2 0 0 0 2 2h14v-4"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></React.Fragment>,
         Music: <React.Fragment><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></React.Fragment>,
@@ -60,15 +58,15 @@ window.Utils.formatTime = (t) => t ? t : '--:--';
 window.Utils.formatCurrency = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 }).format(val);
 
 // ==========================================
-// 3. COMPONENTES UI: NOTIFICACIONES (TOASTS)
+// 3. TOASTS
 // ==========================================
 window.Utils.notify = (message, type = 'success') => {
-    // Despacha un evento personalizado que ToastContainer escuchará
     const event = new CustomEvent('app-toast', { detail: { message, type, id: Date.now() } });
     window.dispatchEvent(event);
 };
 
 window.Utils.ToastContainer = () => {
+    // CORRECCIÓN: Usar React.useState
     const { useState, useEffect } = React;
     const { Icon } = window.Utils;
     const [toasts, setToasts] = useState([]);
@@ -77,7 +75,6 @@ window.Utils.ToastContainer = () => {
         const handler = (e) => {
             const newToast = e.detail;
             setToasts(prev => [...prev, newToast]);
-            // Auto eliminar después de 3s
             setTimeout(() => {
                 setToasts(prev => prev.filter(t => t.id !== newToast.id));
             }, 3500);
@@ -103,23 +100,17 @@ window.Utils.ToastContainer = () => {
 };
 
 // ==========================================
-// 4. COMPONENTES UI: NAVEGACIÓN Y CARGA
+// 4. MONTH CAROUSEL (CORREGIDO)
 // ==========================================
-
-// SKELETON (Carga)
-window.Utils.Skeleton = ({ className = "h-4 w-full" }) => (
-    <div className={`skeleton-pulse rounded-lg bg-slate-200 ${className}`}></div>
-);
-
-// MONTH CAROUSEL (Navegación Mensual Pro)
 window.Utils.MonthCarousel = ({ currentDate, onMonthChange }) => {
-    const { React, useMemo } = window;
+    // CORRECCIÓN: Usar React.useMemo y React.useRef
+    const { useMemo, useRef } = React;
     const { Icon } = window.Utils;
-    const scrollRef = React.useRef(null);
+    const scrollRef = useRef(null);
 
     const monthChips = useMemo(() => {
         const chips = [];
-        for(let i=-6; i<=6; i++) { // Rango ampliado
+        for(let i=-6; i<=6; i++) { 
             const d = new Date();
             d.setMonth(d.getMonth() + i);
             chips.push(d);
@@ -135,7 +126,6 @@ window.Utils.MonthCarousel = ({ currentDate, onMonthChange }) => {
 
     return (
         <div className="relative group mb-6">
-            {/* Flechas PC */}
             <button onClick={()=>scroll('left')} className="hidden md:flex absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white/80 backdrop-blur p-1 rounded-full shadow-sm border border-slate-200 text-slate-500 hover:text-brand-600 hover:scale-110 transition-all">
                 <Icon name="ChevronLeft" size={20}/>
             </button>
@@ -143,7 +133,6 @@ window.Utils.MonthCarousel = ({ currentDate, onMonthChange }) => {
                 <Icon name="ChevronRight" size={20}/>
             </button>
 
-            {/* Contenedor Scroll */}
             <div ref={scrollRef} className="flex overflow-x-auto gap-2 py-2 px-1 hide-scroll scroll-smooth snap-x">
                 {monthChips.map((d, i) => {
                     const isActive = d.toISOString().slice(0,7) === new Date(currentDate).toISOString().slice(0,7);
@@ -167,11 +156,12 @@ window.Utils.MonthCarousel = ({ currentDate, onMonthChange }) => {
 };
 
 // ==========================================
-// 5. COMPONENTES UI: INPUTS INTELIGENTES
+// 5. INPUTS & SMART SELECT
 // ==========================================
 
-// SMART SELECT (Buscador)
+// SMART SELECT
 window.Utils.SmartSelect = ({ label, options, value, onChange, placeholder = "Seleccionar..." }) => {
+    // CORRECCIÓN: Usar React.useState etc
     const { useState, useEffect, useRef } = React;
     const { Icon } = window.Utils;
     
@@ -179,7 +169,6 @@ window.Utils.SmartSelect = ({ label, options, value, onChange, placeholder = "Se
     const [search, setSearch] = useState("");
     const wrapperRef = useRef(null);
 
-    // Cerrar al hacer clic fuera
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
@@ -200,7 +189,6 @@ window.Utils.SmartSelect = ({ label, options, value, onChange, placeholder = "Se
         <div className="relative" ref={wrapperRef}>
             {label && <label className="block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1">{label}</label>}
             
-            {/* Input Trigger */}
             <div 
                 onClick={() => { setIsOpen(!isOpen); setSearch(""); }}
                 className={`w-full bg-white border cursor-pointer text-slate-900 font-medium rounded-xl px-4 py-3 flex justify-between items-center transition-all shadow-input ${isOpen ? 'ring-2 ring-brand-500 border-brand-500' : 'border-slate-300 hover:border-slate-400'}`}
@@ -209,7 +197,6 @@ window.Utils.SmartSelect = ({ label, options, value, onChange, placeholder = "Se
                 <Icon name="ChevronDown" size={16} className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}/>
             </div>
 
-            {/* Dropdown */}
             {isOpen && (
                 <div className="absolute z-50 mt-2 w-full bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden animate-enter">
                     <div className="p-2 border-b border-slate-50 bg-slate-50">
@@ -258,7 +245,7 @@ window.Utils.Input = ({ label, type="text", value, onChange, placeholder, classN
     </div>
 );
 
-// SELECT ALTO CONTRASTE (Nativo)
+// SELECT ALTO CONTRASTE
 window.Utils.Select = ({ label, value, onChange, children, className="" }) => (
     <div className={className}>
         {label && <label className="block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1">{label}</label>}
@@ -278,8 +265,12 @@ window.Utils.Select = ({ label, value, onChange, children, className="" }) => (
 );
 
 // ==========================================
-// 6. COMPONENTES GENÉRICOS (LEGACY)
+// 6. OTROS (MonthNav Legacy, Card, etc)
 // ==========================================
+
+// Mantenemos MonthNav antiguo por compatibilidad si alguna vista no usa Carousel
+window.Utils.MonthNav = window.Utils.MonthCarousel; 
+
 window.Utils.Card = ({ children, className = "", onClick }) => (
     <div onClick={onClick} className={`bg-white rounded-2xl p-6 shadow-soft border border-slate-100 transition-all ${className}`}>
         {children}
@@ -336,7 +327,6 @@ window.Utils.Modal = ({ isOpen, onClose, title, children }) => {
     );
 };
 
-// (Mantener Accordion por compatibilidad)
 window.Utils.Accordion = ({ title, subtitle, badge, children, isOpen, onToggle }) => {
     const { Icon } = window.Utils;
     return (
@@ -359,3 +349,7 @@ window.Utils.Accordion = ({ title, subtitle, badge, children, isOpen, onToggle }
         </div>
     );
 };
+
+window.Utils.Skeleton = ({ className = "h-4 w-full" }) => (
+    <div className={`skeleton-pulse rounded-lg bg-slate-200 ${className}`}></div>
+);
