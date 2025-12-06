@@ -35,7 +35,9 @@
             DollarSign: <React.Fragment><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></React.Fragment>,
             Info: <React.Fragment><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></React.Fragment>,
             Image: <React.Fragment><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></React.Fragment>,
-            Printer: <React.Fragment><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></React.Fragment>
+            Printer: <React.Fragment><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></React.Fragment>,
+            Clock: <React.Fragment><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></React.Fragment>,
+            MessageCircle: <React.Fragment><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></React.Fragment>
         };
         return (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -61,8 +63,9 @@
         window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type, id: Date.now() } }));
     };
     window.Utils.ToastContainer = () => {
-        const [toasts, setToasts] = useState([]);
+        const { useState, useEffect } = React;
         const { Icon } = window.Utils;
+        const [toasts, setToasts] = useState([]);
         useEffect(() => {
             const handler = (e) => {
                 const t = e.detail;
@@ -84,8 +87,7 @@
         );
     };
 
-    // --- 4. DATE FILTER (REEMPLAZO DE CHIPS) ---
-    // Selector robusto de Mes y Año (No se rompe)
+    // --- 4. DATE FILTER (Selector Robusto) ---
     window.Utils.DateFilter = ({ currentDate, onChange }) => {
         const months = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
         const year = currentDate.getFullYear();
@@ -110,7 +112,7 @@
                         {months.map((m, i) => <option key={i} value={i}>{m}</option>)}
                     </select>
                     <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                        <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                        <svg className="fill-current h-4 w-4" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
                     </div>
                 </div>
                 <div className="relative">
@@ -118,14 +120,14 @@
                         {[year-1, year, year+1].map(y => <option key={y} value={y}>{y}</option>)}
                     </select>
                     <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                        <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                        <svg className="fill-current h-4 w-4" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
                     </div>
                 </div>
             </div>
         );
     };
-    // Alias para compatibilidad
-    window.Utils.MonthNav = window.Utils.DateFilter; 
+    // Alias para compatibilidad con vistas anteriores
+    window.Utils.MonthNav = window.Utils.DateFilter;
     window.Utils.MonthCarousel = window.Utils.DateFilter;
 
     // --- 5. COMPONENTES UI ---
@@ -179,7 +181,6 @@
     window.Utils.Badge = ({ children, type = 'default' }) => { const s = { default: "bg-slate-100 text-slate-600", success: "bg-emerald-100 text-emerald-700", warning: "bg-amber-100 text-amber-700", danger: "bg-red-100 text-red-700", brand: "bg-brand-100 text-brand-700", blue: "bg-blue-100 text-blue-700" }; return <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide ${s[type] || s.default}`}>{children}</span>; };
     window.Utils.Button = ({ children, onClick, variant = 'primary', icon, className = "", disabled=false }) => { const { Icon } = window.Utils; const v = { primary: "bg-brand-600 text-white hover:bg-brand-700 shadow-glow", secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50", danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100", ghost: "bg-transparent text-slate-500 hover:bg-slate-100" }; return (<button disabled={disabled} onClick={onClick} className={`flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${v[variant]} ${className}`}>{icon && <Icon name={icon} size={18} />}{children}</button>); };
     window.Utils.Modal = ({ isOpen, onClose, title, children }) => { const { Icon } = window.Utils; useEffect(() => { document.body.style.overflow = isOpen ? 'hidden' : 'unset'; return () => { document.body.style.overflow = 'unset'; }; }, [isOpen]); if (!isOpen) return null; return (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in"><div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative animate-enter"><div className="p-6 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white/95 backdrop-blur z-10"><h3 className="text-xl font-extrabold text-slate-800 tracking-tight">{title}</h3><button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><Icon name="X" /></button></div><div className="p-6">{children}</div></div></div>); };
-    window.Utils.Accordion = ({ title, subtitle, badge, children, isOpen, onToggle }) => { const { Icon } = window.Utils; return (<div className={`border border-slate-200 rounded-2xl overflow-hidden transition-all duration-300 ${isOpen ? 'shadow-lg ring-1 ring-brand-500/20 bg-white' : 'bg-slate-50 hover:bg-white'}`}><div className="p-4 cursor-pointer flex justify-between items-center" onClick={onToggle}><div className="flex items-center gap-3"><div className={`w-1.5 h-10 rounded-full ${badge ? badge : 'bg-brand-500'}`}></div><div><h4 className="font-bold text-slate-800">{title}</h4><p className="text-xs text-slate-500 font-medium">{subtitle}</p></div></div><Icon name="ChevronDown" className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} /></div>{isOpen && (<div className="px-6 pb-6 pt-2 border-t border-slate-100 bg-white animate-enter">{children}</div>)}</div>); };
     window.Utils.Skeleton = ({ className = "h-4 w-full" }) => (<div className={`skeleton-pulse rounded-lg bg-slate-200 ${className}`}></div>);
     window.Utils.compressImage = (file) => { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = (event) => { const img = new Image(); img.src = event.target.result; img.onload = () => { const canvas = document.createElement('canvas'); const MAX_WIDTH = 800; const scaleSize = MAX_WIDTH / img.width; canvas.width = (scaleSize < 1) ? MAX_WIDTH : img.width; canvas.height = (scaleSize < 1) ? img.height * scaleSize : img.height; const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, canvas.width, canvas.height); resolve(canvas.toDataURL('image/jpeg', 0.7)); }; }; reader.onerror = error => reject(error); }); };
 
