@@ -2,11 +2,14 @@
 window.Views = window.Views || {};
 
 window.Views.Finances = ({ finances, addData, userProfile }) => {
-    // 1. HOOKS
-    const { useState, useMemo, useEffect } = React;
+    // 1. HOOKS (CORREGIDO)
+    // Aquí importamos TODO lo que necesitas de React en una sola línea:
+    const { useState, useMemo, useEffect, useRef } = React;
+    
     const Utils = window.Utils || {};
     const { Card, Button, Modal, Input, Select, DateFilter, formatCurrency, formatDate, Icon, SmartSelect, compressImage } = Utils;
-    const { useRef, useState, useEffect } = React; // Agrega esta línea al inicio
+    
+    // (Borramos la línea repetida que causaba el error)
     
     // Estados UI
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -223,19 +226,22 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                 </div>
             </div>
 
-            {/* 2. TARJETAS DE SALDO */}
+            {/* 2. TARJETAS DE SALDO (CORREGIDO) */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-slate-900 text-white p-6 rounded-3xl shadow-lg relative overflow-hidden">
                     <div className="absolute -right-4 -top-4 bg-white/10 w-24 h-24 rounded-full blur-2xl"></div>
                     <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Total Global</p>
-                    <h3 className="text-4xl font-black">{renderAmount(globalBalances.total)}</h3>
+                    {/* CAMBIO: De globalBalances a balances */}
+                    <h3 className="text-4xl font-black">{renderAmount(balances.total)}</h3>
+                    
                     {/* Indicador de Tendencia */}
-                    <div className={`mt-2 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold ${globalBalances.trend >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                        <span>{globalBalances.trend >= 0 ? '↑' : '↓'} {Math.abs(globalBalances.trend)}% vs mes anterior</span>
+                    <div className={`mt-2 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold ${balances.trend >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                        <span>{balances.trend >= 0 ? '↑' : '↓'} {Math.abs(balances.trend)}% vs mes anterior</span>
                     </div>
                 </div>
-                <Card className="border-l-4 border-l-emerald-500 py-4"><p className="text-xs text-slate-500 font-bold uppercase">Caja Chica (Efectivo)</p><h3 className="text-2xl font-extrabold text-slate-800 mt-1">{renderAmount(globalBalances.cash)}</h3></Card>
-                <Card className="border-l-4 border-l-blue-500 py-4"><p className="text-xs text-slate-500 font-bold uppercase">Banco / Digital</p><h3 className="text-2xl font-extrabold text-slate-800 mt-1">{renderAmount(globalBalances.bank)}</h3></Card>
+                {/* CAMBIO: De globalBalances a balances */}
+                <Card className="border-l-4 border-l-emerald-500 py-4"><p className="text-xs text-slate-500 font-bold uppercase">Caja Chica (Efectivo)</p><h3 className="text-2xl font-extrabold text-slate-800 mt-1">{renderAmount(balances.cash)}</h3></Card>
+                <Card className="border-l-4 border-l-blue-500 py-4"><p className="text-xs text-slate-500 font-bold uppercase">Banco / Digital</p><h3 className="text-2xl font-extrabold text-slate-800 mt-1">{renderAmount(balances.bank)}</h3></Card>
             </div>
 
             {/* 3. PESTAÑA PANEL (GRÁFICOS) */}
