@@ -3,17 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Conquistadores App</title>
+    <title>Conquistadores App - Sistema Integral</title>
+    
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2563eb">
     
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
     
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
-    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -27,8 +30,15 @@
             theme: {
                 extend: {
                     fontFamily: { sans: ['"Plus Jakarta Sans"', 'sans-serif'] },
-                    colors: { brand: { 50:'#eff6ff', 100:'#dbeafe', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8', 900:'#1e3a8a' }, surface: '#f8fafc' },
-                    boxShadow: { 'soft': '0 4px 20px -2px rgba(0,0,0,0.05)', 'glow': '0 0 15px rgba(37,99,235,0.3)', 'input': '0 2px 5px rgba(0,0,0,0.03)' }
+                    colors: {
+                        brand: { 50:'#eff6ff', 100:'#dbeafe', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8', 900:'#1e3a8a' },
+                        surface: '#f8fafc'
+                    },
+                    boxShadow: {
+                        'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
+                        'glow': '0 0 15px rgba(37, 99, 235, 0.3)',
+                        'input': '0 2px 5px rgba(0,0,0,0.03)'
+                    }
                 }
             }
         }
@@ -36,19 +46,33 @@
     <style>
         body { background-color: #f1f5f9; -webkit-font-smoothing: antialiased; }
         .hide-scroll::-webkit-scrollbar { display: none; }
-        .animate-enter { animation: enter 0.3s ease-out; }
-        @keyframes enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-        .input-modern { @apply w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500 outline-none; }
+        .animate-enter { animation: enter 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes enter { from { opacity: 0; transform: translateY(10px) scale(0.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .toast-enter { animation: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes toast-in { from { opacity: 0; transform: translateY(-20px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .skeleton-pulse { background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%); background-size: 200% 100%; animation: skeleton-loading 1.5s infinite; }
+        @keyframes skeleton-loading { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .input-modern { @apply w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500 transition-all outline-none; }
         .label-modern { @apply block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1; }
     </style>
 
     <script>
-        const firebaseConfig = { apiKey: "AIzaSyDXK_EcXsFGhRmXfkKG8SMdsM69c4PNfHw", authDomain: "conquistadoresapp.firebaseapp.com", projectId: "conquistadoresapp", storageBucket: "conquistadoresapp.firebasestorage.app", messagingSenderId: "518647225464", appId: "1:518647225464:web:b3344ca5172498187e218d" };
+        const firebaseConfig = {
+            apiKey: "AIzaSyDXK_EcXsFGhRmXfkKG8SMdsM69c4PNfHw",
+            authDomain: "conquistadoresapp.firebaseapp.com",
+            projectId: "conquistadoresapp",
+            storageBucket: "conquistadoresapp.firebasestorage.app",
+            messagingSenderId: "518647225464",
+            appId: "1:518647225464:web:b3344ca5172498187e218d"
+        };
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         window.db = firebase.firestore();
         window.auth = firebase.auth();
         window.googleProvider = new firebase.auth.GoogleAuthProvider();
-        if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
+        
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js').catch(() => {}));
+        }
     </script>
 
     <script type="text/babel" src="src/Utils.js"></script>
@@ -76,12 +100,14 @@
         const Views = window.Views || {};
         const { Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging, Blog, QuickActions } = Views;
 
-        const LoginScreen = ({ onLogin }) => (
+        const LoginScreen = ({ onLogin, loading, error }) => (
             <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
                 <div className="bg-white p-8 rounded-3xl shadow-soft max-w-sm w-full text-center">
                     <div className="bg-brand-600 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-glow"><Icon name="Home" size={32}/></div>
                     <h1 className="text-2xl font-extrabold text-slate-800">Conquistadores</h1>
-                    <button onClick={onLogin} className="w-full bg-brand-600 text-white py-3.5 rounded-xl font-bold shadow-lg mt-6">Ingresar con Google</button>
+                    <p className="text-slate-500 mb-6 font-medium">Sistema de Gestión Integral</p>
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 font-medium">{error}</div>}
+                    <button onClick={onLogin} className="w-full bg-brand-600 text-white py-3.5 rounded-xl font-bold shadow-lg hover:bg-brand-700 transition-all">{loading ? 'Conectando...' : 'Ingresar con Google'}</button>
                 </div>
             </div>
         );
@@ -89,38 +115,58 @@
         const App = () => {
             const [currentUser, setCurrentUser] = useState(null);
             const [userProfile, setUserProfile] = useState(null);
-            const [loading, setLoading] = useState(true);
+            const [loadingAuth, setLoadingAuth] = useState(true);
+            const [authError, setAuthError] = useState(null);
             const [activeTab, setActiveTab] = useState('dashboard');
             const [sidebarOpen, setSidebarOpen] = useState(false);
-            const [data, setData] = useState({ members:[], finances:[], worship:[], songs:[], ebd:[], youth:[], tasks:[], servers:[], messages:[], posts:[] });
+
+            // Datos
+            const [members, setMembers] = useState([]);
+            const [finances, setFinances] = useState([]);
+            const [worship, setWorship] = useState([]);
+            const [songs, setSongs] = useState([]);
+            const [ebd, setEbd] = useState([]);
+            const [youth, setYouth] = useState([]);
+            const [tasks, setTasks] = useState([]);
+            const [servers, setServers] = useState([]);
+            const [messages, setMessages] = useState([]);
+            const [posts, setPosts] = useState([]);
 
             const setters = {
-                members: v=>setData(p=>({...p, members:v})), finances: v=>setData(p=>({...p, finances:v})), worship: v=>setData(p=>({...p, worship:v})),
-                songs: v=>setData(p=>({...p, songs:v})), ebd: v=>setData(p=>({...p, ebd:v})), youth: v=>setData(p=>({...p, youth:v})),
-                tasks: v=>setData(p=>({...p, tasks:v})), servers: v=>setData(p=>({...p, servers:v})), messages: v=>setData(p=>({...p, messages:v})), posts: v=>setData(p=>({...p, posts:v}))
+                members: setMembers, finances: setFinances, worship: setWorship, songs: setSongs,
+                ebd: setEbd, youth: setYouth, tasks: setTasks, servers: setServers, messages: setMessages, posts: setPosts
             };
 
             useEffect(() => {
-                window.auth.onAuthStateChanged(async (u) => {
-                    if (u) {
-                        setUser(u);
-                        const q = await window.db.collection('members').where('email', '==', u.email).get();
-                        if (!q.empty) setProfile({ ...q.docs[0].data(), id: q.docs[0].id });
-                        else {
-                             const adm = { name: u.displayName, email: u.email, role: 'Pastor', ministry: 'General', photo: u.photoURL, status: 'Activo' };
-                             await window.db.collection('members').add(adm); setProfile(adm);
-                        }
-                    } else { setUser(null); setProfile(null); }
-                    setLoading(false);
+                const unsubscribe = window.auth.onAuthStateChanged(async (user) => {
+                    if (user) {
+                        setCurrentUser(user);
+                        try {
+                            const q = window.db.collection('members').where('email', '==', user.email);
+                            const snapshot = await q.get();
+                            if (!snapshot.empty) setUserProfile({ ...snapshot.docs[0].data(), id: snapshot.docs[0].id });
+                            else {
+                                const checkEmpty = await window.db.collection('members').get();
+                                if(checkEmpty.empty) {
+                                    const admin = { name: user.displayName, email: user.email, role: 'Pastor', ministry: 'General', photo: user.photoURL, status: 'Activo' };
+                                    await window.db.collection('members').add(admin);
+                                    setUserProfile(admin);
+                                } else setAuthError("Tu email no está registrado.");
+                            }
+                        } catch(e) { setAuthError("Error de red"); }
+                    } else { setCurrentUser(null); setUserProfile(null); }
+                    setLoadingAuth(false);
                 });
+                return () => unsubscribe();
             }, []);
 
-            useFirebaseListeners(profile, setters);
-            const login = () => window.auth.signInWithPopup(window.googleProvider);
-            const logout = () => window.auth.signOut();
+            useFirebaseListeners(userProfile, setters);
 
-            if (loading) return <div className="h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse">Cargando...</div>;
-            if (!user || !profile) return <LoginScreen onLogin={login} />;
+            const handleLogin = async () => { try { await window.auth.signInWithPopup(window.googleProvider); } catch(e) { setAuthError("Error Google"); } };
+            const handleLogout = () => window.auth.signOut();
+
+            if (loadingAuth) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse">Cargando sistema...</div>;
+            if (!currentUser || !userProfile) return <LoginScreen onLogin={handleLogin} loading={loadingAuth} error={authError} />;
 
             const NavItem = ({ id, label, icon }) => (
                 <button onClick={() => { setActiveTab(id); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all mb-1 ${activeTab === id ? 'bg-brand-50 text-brand-600 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
@@ -129,47 +175,50 @@
             );
 
             return (
-                <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
+                <div className="flex h-screen bg-slate-50 overflow-hidden text-slate-900 font-sans">
                     {ToastContainer && <ToastContainer />}
-                    <aside className={`fixed inset-y-0 left-0 z-40 w-72 bg-white border-r border-slate-100 transition-transform duration-300 md:relative md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+                    <aside className={`fixed inset-y-0 left-0 z-40 w-72 bg-white border-r border-slate-100 transform transition-transform duration-300 md:relative md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                         <div className="p-6 flex flex-col h-full">
                             <div className="flex items-center gap-3 mb-8"><div className="bg-brand-600 text-white p-2 rounded-xl shadow-glow">{Icon && <Icon name="Home"/>}</div><span className="font-extrabold text-xl tracking-tight text-slate-800">Conquistadores</span></div>
-                            <nav className="flex-1 overflow-y-auto hide-scroll space-y-1">
+                            <nav className="space-y-1 flex-1 overflow-y-auto hide-scroll">
                                 <NavItem id="dashboard" icon="Home" label="Inicio" />
                                 <NavItem id="calendar" icon="Calendar" label="Calendario" />
                                 <NavItem id="blog" icon="Book" label="Devocionales" />
                                 <div className="mt-6 mb-2 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Ministerios</div>
-                                <NavItem id="worship" icon="Music" label="Alabanza" />
-                                <NavItem id="servers" icon="Hand" label="Servidores" />
-                                <NavItem id="ebd" icon="BookOpen" label="Escuela Bíblica" />
-                                <NavItem id="youth" icon="Smile" label="Jóvenes" />
+                                {(userProfile.role === 'Pastor' || userProfile.ministry === 'Alabanza') && <NavItem id="worship" icon="Music" label="Alabanza" />}
+                                {(userProfile.role === 'Pastor' || userProfile.ministry === 'Servidores' || userProfile.ministry === 'General') && <NavItem id="servers" icon="Hand" label="Servidores" />}
+                                {(userProfile.role === 'Pastor' || userProfile.ministry === 'EBD') && <NavItem id="ebd" icon="BookOpen" label="Escuela Bíblica" />}
+                                {(userProfile.role === 'Pastor' || userProfile.ministry === 'Jóvenes') && <NavItem id="youth" icon="Smile" label="Jóvenes" />}
                                 <div className="mt-6 mb-2 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Gestión</div>
-                                {profile.role === 'Pastor' && <NavItem id="finances" icon="Wallet" label="Tesorería" />}
+                                {userProfile.role === 'Pastor' && <NavItem id="finances" icon="Wallet" label="Tesorería" />}
                                 <NavItem id="members" icon="Users" label="Directorio" />
                                 <NavItem id="messages" icon="Mail" label="Mensajería" />
                             </nav>
-                            <div className="mt-auto pt-6 border-t flex justify-between items-center"><div className="flex gap-3 items-center"><img src={profile.photo} className="w-9 h-9 rounded-full bg-slate-200"/><div className="leading-tight"><p className="font-bold text-xs truncate w-24">{profile.name}</p><p className="text-[9px] uppercase font-bold text-slate-500">{profile.role}</p></div></div><button onClick={logout} className="text-red-500"><Icon name="LogOut"/></button></div>
+                            <div className="mt-auto pt-6 border-t border-slate-100 flex items-center justify-between">
+                                <div className="flex items-center gap-3 overflow-hidden"><img src={userProfile.photo} className="w-10 h-10 rounded-full bg-slate-200 object-cover"/><div className="leading-tight overflow-hidden"><p className="font-bold text-sm text-slate-800 truncate w-24">{userProfile.name}</p><p className="text-[10px] text-slate-500 uppercase font-bold">{userProfile.role}</p></div></div>
+                                <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors p-2">{Icon && <Icon name="LogOut"/>}</button>
+                            </div>
                         </div>
                     </aside>
                     <main className="flex-1 flex flex-col h-screen overflow-hidden relative w-full">
-                        <header className="md:hidden bg-white/80 backdrop-blur p-4 border-b flex justify-between items-center z-20"><span className="font-bold text-lg text-slate-800">Conquistadores</span><button onClick={()=>setSidebarOpen(true)} className="text-slate-600">{Icon && <Icon name="Menu"/>}</button></header>
+                        <header className="md:hidden bg-white/80 backdrop-blur p-4 flex justify-between items-center border-b border-slate-100 sticky top-0 z-20"><span className="font-bold text-lg text-slate-800">Conquistadores</span><button onClick={()=>setSidebarOpen(true)} className="text-slate-600">{Icon && <Icon name="Menu"/>}</button></header>
                         <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24">
-                            <div className="max-w-6xl mx-auto">
-                                {activeTab==='dashboard' && Dashboard && <Dashboard userProfile={profile} {...data} updateData={updateData} setActiveTab={setActiveTab} />}
-                                {activeTab==='finances' && Finances && <Finances finances={data.finances} addData={addData} userProfile={profile} />}
-                                {activeTab==='worship' && Worship && <Worship worship={data.worship} songs={data.songs} members={data.members} addData={addData} updateData={updateData} deleteData={deleteData} />}
-                                {activeTab==='ebd' && MinistryWithTasks && <MinistryWithTasks title="Escuela Bíblica" col="ebd" filterMinistry="EBD" members={data.members} tasks={data.tasks} events={data.ebd} addData={addData} deleteData={deleteData} updateData={updateData} />}
-                                {activeTab==='youth' && MinistryWithTasks && <MinistryWithTasks title="Jóvenes" col="youth" filterMinistry="Jóvenes" members={data.members} tasks={data.tasks} events={data.youth} addData={addData} deleteData={deleteData} updateData={updateData} />}
-                                {activeTab==='servers' && MinistryWithTasks && <MinistryWithTasks title="Cuerpo de Servidores" col="servers" filterMinistry="Servidores" members={data.members} tasks={data.tasks} events={data.servers} addData={addData} deleteData={deleteData} updateData={updateData} />}
-                                {activeTab==='calendar' && GlobalCalendar && <GlobalCalendar {...data} userProfile={profile} addData={addData} />}
-                                {activeTab==='messages' && Messaging && <Messaging messages={data.messages} members={data.members} userProfile={profile} addData={addData} updateData={updateData} deleteData={deleteData} />}
-                                {activeTab==='blog' && Blog && <Blog userProfile={profile} addData={addData} deleteData={deleteData} updateData={updateData} />}
-                                {activeTab==='members' && Directory && <Directory members={data.members} addData={addData} updateData={updateData} deleteData={deleteData} />}
+                            <div className="max-w-6xl mx-auto h-full">
+                                {activeTab === 'dashboard' && Dashboard && <Dashboard userProfile={userProfile} worship={worship} servers={servers} tasks={tasks} messages={messages} ebd={ebd} youth={youth} updateData={updateData} setActiveTab={setActiveTab} />}
+                                {activeTab === 'members' && Directory && <Directory members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
+                                {activeTab === 'worship' && Worship && <Worship worship={worship} songs={songs} members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
+                                {activeTab === 'finances' && Finances && <Finances finances={finances} addData={addData} userProfile={userProfile} />}
+                                {activeTab === 'ebd' && MinistryWithTasks && <MinistryWithTasks title="Escuela Bíblica" col="ebd" filterMinistry="EBD" members={members} tasks={tasks} events={ebd} addData={addData} deleteData={deleteData} updateData={updateData} />}
+                                {activeTab === 'youth' && MinistryWithTasks && <MinistryWithTasks title="Jóvenes" col="youth" filterMinistry="Jóvenes" members={members} tasks={tasks} events={youth} addData={addData} deleteData={deleteData} updateData={updateData} />}
+                                {activeTab === 'servers' && MinistryWithTasks && <MinistryWithTasks title="Cuerpo de Servidores" col="servers" filterMinistry="Servidores" members={members} tasks={tasks} events={servers} addData={addData} deleteData={deleteData} updateData={updateData} />}
+                                {activeTab === 'calendar' && GlobalCalendar && <GlobalCalendar worship={worship} youth={youth} ebd={ebd} servers={servers} tasks={tasks} userProfile={userProfile} addData={addData} />}
+                                {activeTab === 'messages' && Messaging && <Messaging messages={messages} members={members} userProfile={userProfile} addData={addData} updateData={updateData} deleteData={deleteData} />}
+                                {activeTab === 'blog' && Blog && <Blog userProfile={userProfile} addData={addData} deleteData={deleteData} updateData={updateData} />}
                             </div>
                         </div>
                     </main>
-                    {QuickActions && <QuickActions userProfile={profile} setActiveTab={setActiveTab} />}
-                    {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setSidebarOpen(false)}></div>}
+                    {QuickActions && <QuickActions userProfile={userProfile} setActiveTab={setActiveTab} />}
+                    {sidebarOpen && <div className="fixed inset-0 bg-slate-900/50 z-30 md:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)}></div>}
                 </div>
             );
         };
