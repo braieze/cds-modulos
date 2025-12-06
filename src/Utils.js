@@ -4,7 +4,7 @@
     const { React } = window;
     const { useState, useEffect, useRef, useMemo } = React;
 
-    // --- ICONOS ---
+    // --- 1. ICONOS ---
     window.Utils.Icon = ({ name, size = 20, className = "" }) => {
         const icons = {
             Home: <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>,
@@ -34,7 +34,8 @@
             Briefcase: <React.Fragment><rect x="2" y="7" width="20" height="14" rx="2" ry="2" transform="translate(0 -2)"/></React.Fragment>,
             DollarSign: <React.Fragment><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></React.Fragment>,
             Info: <React.Fragment><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></React.Fragment>,
-            Image: <React.Fragment><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></React.Fragment>
+            Image: <React.Fragment><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></React.Fragment>,
+            Printer: <React.Fragment><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></React.Fragment>
         };
         return (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -43,7 +44,7 @@
         );
     };
 
-    // --- HELPERS ---
+    // --- 2. HELPERS ---
     window.Utils.formatDate = (d, fmt = 'short') => {
         if(!d) return '';
         const date = new Date(d);
@@ -55,7 +56,7 @@
     window.Utils.formatTime = (t) => t ? t : '--:--';
     window.Utils.formatCurrency = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 }).format(val);
 
-    // --- TOASTS ---
+    // --- 3. TOASTS ---
     window.Utils.notify = (message, type = 'success') => {
         window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type, id: Date.now() } }));
     };
@@ -83,31 +84,51 @@
         );
     };
 
-    // --- CAROUSEL ---
-    window.Utils.MonthCarousel = ({ currentDate, onMonthChange }) => {
-        const scrollRef = useRef(null);
-        const { Icon } = window.Utils;
-        const chips = useMemo(() => {
-            const c = [];
-            for(let i=-6; i<=6; i++) { const d = new Date(); d.setMonth(d.getMonth() + i); c.push(d); }
-            return c;
-        }, []);
-        const scroll = (dir) => scrollRef.current?.scrollBy({ left: dir==='left'?-200:200, behavior:'smooth' });
+    // --- 4. DATE FILTER (REEMPLAZO DE CHIPS) ---
+    // Selector robusto de Mes y Año (No se rompe)
+    window.Utils.DateFilter = ({ currentDate, onChange }) => {
+        const months = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+
+        const handleMonth = (e) => {
+            const d = new Date(currentDate);
+            d.setMonth(parseInt(e.target.value));
+            onChange(d);
+        };
+
+        const handleYear = (e) => {
+            const d = new Date(currentDate);
+            d.setFullYear(parseInt(e.target.value));
+            onChange(d);
+        };
+
         return (
-            <div className="relative group mb-6">
-                <button onClick={()=>scroll('left')} className="hidden md:flex absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white/80 backdrop-blur p-1 rounded-full shadow-sm border border-slate-200 hover:text-brand-600 hover:scale-110 transition-all"><Icon name="ChevronLeft" size={20}/></button>
-                <button onClick={()=>scroll('right')} className="hidden md:flex absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white/80 backdrop-blur p-1 rounded-full shadow-sm border border-slate-200 hover:text-brand-600 hover:scale-110 transition-all"><Icon name="ChevronRight" size={20}/></button>
-                <div ref={scrollRef} className="flex overflow-x-auto gap-2 py-2 px-1 hide-scroll scroll-smooth snap-x">
-                    {chips.map((d, i) => (
-                        <button key={i} onClick={()=>onMonthChange(d)} className={`snap-center flex-shrink-0 px-5 py-2.5 rounded-full text-sm font-bold whitespace-nowrap transition-all border shadow-sm ${d.toISOString().slice(0,7)===new Date(currentDate).toISOString().slice(0,7) ? 'bg-brand-600 text-white border-brand-600 shadow-brand-500/30 scale-105' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>{window.Utils.formatDate(d, 'month')}</button>
-                    ))}
+            <div className="flex gap-2 mb-4">
+                <div className="relative">
+                    <select value={month} onChange={handleMonth} className="appearance-none bg-white border border-slate-200 text-slate-700 font-bold py-2 pl-4 pr-8 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none shadow-sm cursor-pointer hover:bg-slate-50">
+                        {months.map((m, i) => <option key={i} value={i}>{m}</option>)}
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                        <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                    </div>
+                </div>
+                <div className="relative">
+                    <select value={year} onChange={handleYear} className="appearance-none bg-white border border-slate-200 text-slate-700 font-bold py-2 pl-4 pr-8 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none shadow-sm cursor-pointer hover:bg-slate-50">
+                        {[year-1, year, year+1].map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                        <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                    </div>
                 </div>
             </div>
         );
     };
-    window.Utils.MonthNav = window.Utils.MonthCarousel; // Alias
+    // Alias para compatibilidad
+    window.Utils.MonthNav = window.Utils.DateFilter; 
+    window.Utils.MonthCarousel = window.Utils.DateFilter;
 
-    // --- COMPONENTES UI ---
+    // --- 5. COMPONENTES UI ---
     window.Utils.Input = ({ label, type="text", value, onChange, placeholder, className="" }) => (
         <div className={className}>
             {label && <label className="block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1">{label}</label>}
@@ -157,47 +178,9 @@
     window.Utils.Card = ({ children, className = "", onClick }) => (<div onClick={onClick} className={`bg-white rounded-2xl p-6 shadow-soft border border-slate-100 transition-all ${className}`}>{children}</div>);
     window.Utils.Badge = ({ children, type = 'default' }) => { const s = { default: "bg-slate-100 text-slate-600", success: "bg-emerald-100 text-emerald-700", warning: "bg-amber-100 text-amber-700", danger: "bg-red-100 text-red-700", brand: "bg-brand-100 text-brand-700", blue: "bg-blue-100 text-blue-700" }; return <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide ${s[type] || s.default}`}>{children}</span>; };
     window.Utils.Button = ({ children, onClick, variant = 'primary', icon, className = "", disabled=false }) => { const { Icon } = window.Utils; const v = { primary: "bg-brand-600 text-white hover:bg-brand-700 shadow-glow", secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50", danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100", ghost: "bg-transparent text-slate-500 hover:bg-slate-100" }; return (<button disabled={disabled} onClick={onClick} className={`flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${v[variant]} ${className}`}>{icon && <Icon name={icon} size={18} />}{children}</button>); };
-    
-    window.Utils.Modal = ({ isOpen, onClose, title, children }) => {
-        const { Icon } = window.Utils;
-        useEffect(() => { document.body.style.overflow = isOpen ? 'hidden' : 'unset'; return () => { document.body.style.overflow = 'unset'; }; }, [isOpen]);
-        if (!isOpen) return null;
-        return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in">
-                <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative animate-enter">
-                    <div className="p-6 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white/95 backdrop-blur z-10">
-                        <h3 className="text-xl font-extrabold text-slate-800 tracking-tight">{title}</h3>
-                        <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><Icon name="X" /></button>
-                    </div>
-                    <div className="p-6">{children}</div>
-                </div>
-            </div>
-        );
-    };
-
+    window.Utils.Modal = ({ isOpen, onClose, title, children }) => { const { Icon } = window.Utils; useEffect(() => { document.body.style.overflow = isOpen ? 'hidden' : 'unset'; return () => { document.body.style.overflow = 'unset'; }; }, [isOpen]); if (!isOpen) return null; return (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in"><div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative animate-enter"><div className="p-6 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white/95 backdrop-blur z-10"><h3 className="text-xl font-extrabold text-slate-800 tracking-tight">{title}</h3><button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><Icon name="X" /></button></div><div className="p-6">{children}</div></div></div>); };
     window.Utils.Accordion = ({ title, subtitle, badge, children, isOpen, onToggle }) => { const { Icon } = window.Utils; return (<div className={`border border-slate-200 rounded-2xl overflow-hidden transition-all duration-300 ${isOpen ? 'shadow-lg ring-1 ring-brand-500/20 bg-white' : 'bg-slate-50 hover:bg-white'}`}><div className="p-4 cursor-pointer flex justify-between items-center" onClick={onToggle}><div className="flex items-center gap-3"><div className={`w-1.5 h-10 rounded-full ${badge ? badge : 'bg-brand-500'}`}></div><div><h4 className="font-bold text-slate-800">{title}</h4><p className="text-xs text-slate-500 font-medium">{subtitle}</p></div></div><Icon name="ChevronDown" className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} /></div>{isOpen && (<div className="px-6 pb-6 pt-2 border-t border-slate-100 bg-white animate-enter">{children}</div>)}</div>); };
     window.Utils.Skeleton = ({ className = "h-4 w-full" }) => (<div className={`skeleton-pulse rounded-lg bg-slate-200 ${className}`}></div>);
+    window.Utils.compressImage = (file) => { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = (event) => { const img = new Image(); img.src = event.target.result; img.onload = () => { const canvas = document.createElement('canvas'); const MAX_WIDTH = 800; const scaleSize = MAX_WIDTH / img.width; canvas.width = (scaleSize < 1) ? MAX_WIDTH : img.width; canvas.height = (scaleSize < 1) ? img.height * scaleSize : img.height; const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, canvas.width, canvas.height); resolve(canvas.toDataURL('image/jpeg', 0.7)); }; }; reader.onerror = error => reject(error); }); };
 
-    window.Utils.compressImage = (file) => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = (event) => {
-                const img = new Image();
-                img.src = event.target.result;
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 800; 
-                    const scaleSize = MAX_WIDTH / img.width;
-                    canvas.width = (scaleSize < 1) ? MAX_WIDTH : img.width;
-                    canvas.height = (scaleSize < 1) ? img.height * scaleSize : img.height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    resolve(canvas.toDataURL('image/jpeg', 0.7));
-                };
-            };
-            reader.onerror = error => reject(error);
-        });
-    };
-
-})(); // Fin IIFE
+})();
