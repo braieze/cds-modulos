@@ -4,7 +4,7 @@
     const { React } = window;
     const { useState, useEffect, useRef, useMemo } = React;
 
-    // --- 1. ICONOS ---
+    // --- ICONOS (Mismos de siempre + Paperclip para adjuntos) ---
     window.Utils.Icon = ({ name, size = 20, className = "" }) => {
         const icons = {
             Home: <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>,
@@ -37,7 +37,9 @@
             Image: <React.Fragment><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></React.Fragment>,
             Printer: <React.Fragment><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></React.Fragment>,
             Clock: <React.Fragment><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></React.Fragment>,
-            MessageCircle: <React.Fragment><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></React.Fragment>
+            MessageCircle: <React.Fragment><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></React.Fragment>,
+            Paperclip: <React.Fragment><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></React.Fragment>,
+            Download: <React.Fragment><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></React.Fragment>
         };
         return (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -46,142 +48,82 @@
         );
     };
 
-    // --- 2. HELPERS ---
+    // --- 2. HELPERS (Corrección de Fecha) ---
     window.Utils.formatDate = (d, fmt = 'short') => {
         if(!d) return '';
-        const date = new Date(d);
-        if(d.length === 10) date.setMinutes(date.getMinutes() + date.getTimezoneOffset());
+        // CORRECCIÓN ZONA HORARIA: Parsear manualmente YYYY-MM-DD
+        const [y, m, day] = d.split('-').map(Number);
+        const date = new Date(y, m - 1, day); 
+
         if(fmt === 'long') return date.toLocaleDateString('es-AR', { weekday:'long', day: 'numeric', month: 'long' });
         if(fmt === 'month') return date.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
         return date.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
     };
+    
+    // Helper para obtener fecha local segura YYYY-MM-DD
+    window.Utils.getLocalDate = () => {
+        const d = new Date();
+        const offset = d.getTimezoneOffset() * 60000;
+        return new Date(d.getTime() - offset).toISOString().split('T')[0];
+    };
+
     window.Utils.formatTime = (t) => t ? t : '--:--';
     window.Utils.formatCurrency = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 }).format(val);
+    window.Utils.notify = (message, type = 'success') => window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type, id: Date.now() } }));
 
-    // --- 3. TOASTS ---
-    window.Utils.notify = (message, type = 'success') => {
-        window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type, id: Date.now() } }));
-    };
+    // --- 3. COMPONENTES UI ---
     window.Utils.ToastContainer = () => {
         const { useState, useEffect } = React;
         const { Icon } = window.Utils;
         const [toasts, setToasts] = useState([]);
         useEffect(() => {
-            const handler = (e) => {
-                const t = e.detail;
-                setToasts(p => [...p, t]);
-                setTimeout(() => setToasts(p => p.filter(i => i.id !== t.id)), 3500);
-            };
-            window.addEventListener('app-toast', handler);
-            return () => window.removeEventListener('app-toast', handler);
+            const h = (e) => { const t = e.detail; setToasts(p => [...p, t]); setTimeout(() => setToasts(p => p.filter(i => i.id !== t.id)), 3500); };
+            window.addEventListener('app-toast', h); return () => window.removeEventListener('app-toast', h);
         }, []);
         if(!toasts.length) return null;
-        return (
-            <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
-                {toasts.map(t => (
-                    <div key={t.id} className={`toast-enter pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm font-bold ${t.type === 'error' ? 'bg-white border-red-100 text-red-600' : 'bg-slate-900 border-slate-800 text-white'}`}>
-                        <Icon name={t.type === 'error' ? 'AlertCircle' : 'Check'} size={18} /> {t.message}
-                    </div>
-                ))}
-            </div>
-        );
+        return (<div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">{toasts.map(t => (<div key={t.id} className={`toast-enter pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm font-bold ${t.type === 'error' ? 'bg-white border-red-100 text-red-600' : 'bg-slate-900 border-slate-800 text-white'}`}><Icon name={t.type === 'error' ? 'AlertCircle' : 'Check'} size={18} /> {t.message}</div>))}</div>);
     };
 
-    // --- 4. DATE FILTER (Selector Robusto) ---
     window.Utils.DateFilter = ({ currentDate, onChange }) => {
         const months = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth();
-
-        const handleMonth = (e) => {
-            const d = new Date(currentDate);
-            d.setMonth(parseInt(e.target.value));
-            onChange(d);
-        };
-
-        const handleYear = (e) => {
-            const d = new Date(currentDate);
-            d.setFullYear(parseInt(e.target.value));
-            onChange(d);
-        };
-
         return (
             <div className="flex gap-2 mb-4">
-                <div className="relative">
-                    <select value={month} onChange={handleMonth} className="appearance-none bg-white border border-slate-200 text-slate-700 font-bold py-2 pl-4 pr-8 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none shadow-sm cursor-pointer hover:bg-slate-50">
-                        {months.map((m, i) => <option key={i} value={i}>{m}</option>)}
-                    </select>
-                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                        <svg className="fill-current h-4 w-4" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
-                    </div>
-                </div>
-                <div className="relative">
-                    <select value={year} onChange={handleYear} className="appearance-none bg-white border border-slate-200 text-slate-700 font-bold py-2 pl-4 pr-8 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none shadow-sm cursor-pointer hover:bg-slate-50">
-                        {[year-1, year, year+1].map(y => <option key={y} value={y}>{y}</option>)}
-                    </select>
-                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                        <svg className="fill-current h-4 w-4" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
-                    </div>
-                </div>
+                <div className="relative"><select value={month} onChange={e=>{const d=new Date(currentDate);d.setMonth(parseInt(e.target.value));onChange(d)}} className="appearance-none bg-white border border-slate-200 text-slate-700 font-bold py-2 pl-4 pr-8 rounded-xl text-sm outline-none cursor-pointer">{months.map((m, i) => <option key={i} value={i}>{m}</option>)}</select></div>
+                <div className="relative"><select value={year} onChange={e=>{const d=new Date(currentDate);d.setFullYear(parseInt(e.target.value));onChange(d)}} className="appearance-none bg-white border border-slate-200 text-slate-700 font-bold py-2 pl-4 pr-8 rounded-xl text-sm outline-none cursor-pointer">{[year-1, year, year+1].map(y => <option key={y} value={y}>{y}</option>)}</select></div>
             </div>
         );
     };
-    // Alias para compatibilidad con vistas anteriores
     window.Utils.MonthNav = window.Utils.DateFilter;
     window.Utils.MonthCarousel = window.Utils.DateFilter;
-
-    // --- 5. COMPONENTES UI ---
-    window.Utils.Input = ({ label, type="text", value, onChange, placeholder, className="" }) => (
-        <div className={className}>
-            {label && <label className="block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1">{label}</label>}
-            <input type={type} value={value} onChange={onChange} placeholder={placeholder} className="w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-all shadow-input placeholder:text-slate-400 outline-none" />
-        </div>
-    );
-
-    window.Utils.Select = ({ label, value, onChange, children, className="" }) => (
-        <div className={className}>
-            {label && <label className="block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1">{label}</label>}
-            <div className="relative">
-                <select value={value} onChange={onChange} className="w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 pr-10 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-all shadow-input outline-none appearance-none">{children}</select>
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg></div>
-            </div>
-        </div>
-    );
 
     window.Utils.SmartSelect = ({ label, options, value, onChange, placeholder = "Seleccionar..." }) => {
         const { Icon } = window.Utils;
         const [isOpen, setIsOpen] = useState(false);
         const [search, setSearch] = useState("");
         const wrapperRef = useRef(null);
-        useEffect(() => {
-            const h = (e) => { if(wrapperRef.current && !wrapperRef.current.contains(e.target)) setIsOpen(false); };
-            document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h);
-        }, []);
+        useEffect(() => { const h = (e) => { if(wrapperRef.current && !wrapperRef.current.contains(e.target)) setIsOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, []);
         const filtered = options.filter(o => o.label.toLowerCase().includes(search.toLowerCase()));
         return (
             <div className="relative" ref={wrapperRef}>
                 {label && <label className="block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1">{label}</label>}
-                <div onClick={()=>{setIsOpen(!isOpen); setSearch("");}} className={`w-full bg-white border cursor-pointer text-slate-900 font-medium rounded-xl px-4 py-3 flex justify-between items-center transition-all shadow-input ${isOpen?'ring-2 ring-brand-500 border-brand-500':'border-slate-300 hover:border-slate-400'}`}>
-                    <span className={!value?"text-slate-400":""}>{options.find(o=>o.value===value)?.label || placeholder}</span>
-                    <Icon name="ChevronDown" size={16} className={`text-slate-400 transition-transform ${isOpen?'rotate-180':''}`}/>
+                <div onClick={()=>{setIsOpen(!isOpen); setSearch("");}} className="w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 flex justify-between items-center cursor-pointer">
+                    <span className={!value?"text-slate-400":""}>{value ? options.find(o=>o.value===value)?.label : placeholder}</span>
+                    <Icon name="ChevronDown" size={16} className="text-slate-400"/>
                 </div>
-                {isOpen && (
-                    <div className="absolute z-50 mt-2 w-full bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden animate-enter">
-                        <div className="p-2 border-b border-slate-50 bg-slate-50"><div className="flex items-center px-3 py-2 bg-white border border-slate-200 rounded-lg"><Icon name="Search" size={14} className="text-slate-400 mr-2"/><input autoFocus className="w-full text-sm outline-none bg-transparent placeholder-slate-400" placeholder="Buscar..." value={search} onChange={e=>setSearch(e.target.value)}/></div></div>
-                        <div className="max-h-48 overflow-y-auto p-1">
-                            {filtered.length ? filtered.map(o => (<div key={o.value} onClick={()=>{onChange(o.value); setIsOpen(false);}} className={`px-3 py-2.5 rounded-lg text-sm cursor-pointer flex justify-between items-center ${value===o.value?'bg-brand-50 text-brand-700 font-bold':'text-slate-700 hover:bg-slate-50'}`}>{o.label}{value===o.value&&<Icon name="Check" size={14}/>}</div>)) : <div className="px-3 py-4 text-center text-xs text-slate-400">Sin resultados</div>}
-                        </div>
-                    </div>
-                )}
+                {isOpen && (<div className="absolute z-50 mt-2 w-full bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden animate-enter"><div className="p-2 bg-slate-50"><input autoFocus className="w-full bg-white border rounded-lg px-3 py-2 text-sm outline-none" placeholder="Buscar..." value={search} onChange={e=>setSearch(e.target.value)}/></div><div className="max-h-48 overflow-y-auto p-1">{filtered.length ? filtered.map(o => (<div key={o.value} onClick={()=>{onChange(o.value); setIsOpen(false);}} className="px-3 py-2.5 rounded-lg text-sm cursor-pointer hover:bg-slate-50 flex justify-between items-center">{o.label}</div>)) : <div className="p-2 text-center text-xs text-slate-400">Sin resultados</div>}</div></div>)}
             </div>
         );
     };
 
+    window.Utils.Input = ({ label, type="text", value, onChange, placeholder, className="" }) => (<div className={className}>{label && <label className="block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1">{label}</label>}<input type={type} value={value} onChange={onChange} placeholder={placeholder} className="w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-brand-500 transition-all" /></div>);
+    window.Utils.Select = ({ label, value, onChange, children, className="" }) => (<div className={className}>{label && <label className="block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1">{label}</label>}<div className="relative"><select value={value} onChange={onChange} className="w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 pr-10 outline-none appearance-none">{children}</select></div></div>);
     window.Utils.Card = ({ children, className = "", onClick }) => (<div onClick={onClick} className={`bg-white rounded-2xl p-6 shadow-soft border border-slate-100 transition-all ${className}`}>{children}</div>);
-    window.Utils.Badge = ({ children, type = 'default' }) => { const s = { default: "bg-slate-100 text-slate-600", success: "bg-emerald-100 text-emerald-700", warning: "bg-amber-100 text-amber-700", danger: "bg-red-100 text-red-700", brand: "bg-brand-100 text-brand-700", blue: "bg-blue-100 text-blue-700" }; return <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide ${s[type] || s.default}`}>{children}</span>; };
-    window.Utils.Button = ({ children, onClick, variant = 'primary', icon, className = "", disabled=false }) => { const { Icon } = window.Utils; const v = { primary: "bg-brand-600 text-white hover:bg-brand-700 shadow-glow", secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50", danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100", ghost: "bg-transparent text-slate-500 hover:bg-slate-100" }; return (<button disabled={disabled} onClick={onClick} className={`flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${v[variant]} ${className}`}>{icon && <Icon name={icon} size={18} />}{children}</button>); };
+    window.Utils.Badge = ({ children, type = 'default' }) => { const s = { default: "bg-slate-100 text-slate-600", success: "bg-emerald-100 text-emerald-700", warning: "bg-amber-100 text-amber-700", brand: "bg-brand-100 text-brand-700", blue: "bg-blue-100 text-blue-700" }; return <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide ${s[type] || s.default}`}>{children}</span>; };
+    window.Utils.Button = ({ children, onClick, variant = 'primary', icon, className = "", disabled=false }) => { const { Icon } = window.Utils; const v = { primary: "bg-brand-600 text-white hover:bg-brand-700 shadow-glow", secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50", danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100" }; return (<button disabled={disabled} onClick={onClick} className={`flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${v[variant]} ${className}`}>{icon && <Icon name={icon} size={18} />}{children}</button>); };
     window.Utils.Modal = ({ isOpen, onClose, title, children }) => { const { Icon } = window.Utils; useEffect(() => { document.body.style.overflow = isOpen ? 'hidden' : 'unset'; return () => { document.body.style.overflow = 'unset'; }; }, [isOpen]); if (!isOpen) return null; return (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in"><div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative animate-enter"><div className="p-6 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white/95 backdrop-blur z-10"><h3 className="text-xl font-extrabold text-slate-800 tracking-tight">{title}</h3><button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><Icon name="X" /></button></div><div className="p-6">{children}</div></div></div>); };
+    window.Utils.Accordion = ({ title, subtitle, badge, children, isOpen, onToggle }) => { const { Icon } = window.Utils; return (<div className={`border border-slate-200 rounded-2xl overflow-hidden transition-all duration-300 ${isOpen ? 'shadow-lg ring-1 ring-brand-500/20 bg-white' : 'bg-slate-50 hover:bg-white'}`}><div className="p-4 cursor-pointer flex justify-between items-center" onClick={onToggle}><div className="flex items-center gap-3"><div className={`w-1.5 h-10 rounded-full ${badge ? badge : 'bg-brand-500'}`}></div><div><h4 className="font-bold text-slate-800">{title}</h4><p className="text-xs text-slate-500 font-medium">{subtitle}</p></div></div><Icon name="ChevronDown" className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} /></div>{isOpen && (<div className="px-6 pb-6 pt-2 border-t border-slate-100 bg-white animate-enter">{children}</div>)}</div>); };
     window.Utils.Skeleton = ({ className = "h-4 w-full" }) => (<div className={`skeleton-pulse rounded-lg bg-slate-200 ${className}`}></div>);
     window.Utils.compressImage = (file) => { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = (event) => { const img = new Image(); img.src = event.target.result; img.onload = () => { const canvas = document.createElement('canvas'); const MAX_WIDTH = 800; const scaleSize = MAX_WIDTH / img.width; canvas.width = (scaleSize < 1) ? MAX_WIDTH : img.width; canvas.height = (scaleSize < 1) ? img.height * scaleSize : img.height; const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, canvas.width, canvas.height); resolve(canvas.toDataURL('image/jpeg', 0.7)); }; }; reader.onerror = error => reject(error); }); };
-
 })();
