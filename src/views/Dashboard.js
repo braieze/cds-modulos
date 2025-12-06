@@ -1,4 +1,4 @@
-// src/views/Dashboard.js
+// /src/views/Dashboard.js
 window.Views = window.Views || {};
 
 window.Views.Dashboard = ({ userProfile, worship, servers, tasks, messages, ebd, youth, updateData, setActiveTab }) => {
