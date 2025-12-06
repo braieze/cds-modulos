@@ -70,7 +70,6 @@
         window.auth = firebase.auth();
         window.googleProvider = new firebase.auth.GoogleAuthProvider();
         
-        // Registro PWA
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js').catch(() => {}));
         }
@@ -94,8 +93,10 @@
     <div id="root"></div>
     <script type="text/babel">
         const { useState, useEffect } = React;
-        const { Icon, ToastContainer } = window.Utils || {};
-        const { useFirebaseListeners, addData, updateData, deleteData } = window.DataLogic || {};
+        const Utils = window.Utils || {};
+        const { Icon, ToastContainer } = Utils;
+        const DataLogic = window.DataLogic || {};
+        const { useFirebaseListeners, addData, updateData, deleteData } = DataLogic;
         const Views = window.Views || {};
         const { Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging, Blog, QuickActions } = Views;
 
@@ -119,7 +120,6 @@
             const [activeTab, setActiveTab] = useState('dashboard');
             const [sidebarOpen, setSidebarOpen] = useState(false);
 
-            // Datos
             const [members, setMembers] = useState([]);
             const [finances, setFinances] = useState([]);
             const [worship, setWorship] = useState([]);
@@ -200,12 +200,15 @@
                                 {activeTab === 'dashboard' && Dashboard && <Dashboard userProfile={userProfile} worship={worship} servers={servers} tasks={tasks} messages={messages} ebd={ebd} youth={youth} updateData={updateData} setActiveTab={setActiveTab} />}
                                 {activeTab === 'members' && Directory && <Directory members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
                                 {activeTab === 'worship' && Worship && <Worship worship={worship} songs={songs} members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
+                                
+                                {/* AQUÍ SE PASA TODO CORRECTAMENTE A FINANZAS */}
                                 {activeTab === 'finances' && Finances && <Finances finances={finances} addData={addData} userProfile={userProfile} />}
+                                
                                 {activeTab === 'ebd' && MinistryWithTasks && <MinistryWithTasks title="Escuela Bíblica" col="ebd" filterMinistry="EBD" members={members} tasks={tasks} events={ebd} addData={addData} deleteData={deleteData} updateData={updateData} />}
                                 {activeTab === 'youth' && MinistryWithTasks && <MinistryWithTasks title="Jóvenes" col="youth" filterMinistry="Jóvenes" members={members} tasks={tasks} events={youth} addData={addData} deleteData={deleteData} updateData={updateData} />}
                                 {activeTab === 'servers' && MinistryWithTasks && <MinistryWithTasks title="Cuerpo de Servidores" col="servers" filterMinistry="Servidores" members={members} tasks={tasks} events={servers} addData={addData} deleteData={deleteData} updateData={updateData} />}
                                 {activeTab === 'calendar' && GlobalCalendar && <GlobalCalendar worship={worship} youth={youth} ebd={ebd} servers={servers} tasks={tasks} userProfile={userProfile} addData={addData} />}
-                                {activeTab === 'messages' && Messaging && <Messaging messages={messages} members={members} userProfile={userProfile} addData={addData} updateData={updateData} />}
+                                {activeTab === 'messages' && Messaging && <Messaging messages={messages} members={members} userProfile={userProfile} addData={addData} updateData={updateData} deleteData={deleteData} />}
                                 {activeTab === 'blog' && Blog && <Blog userProfile={userProfile} addData={addData} deleteData={deleteData} updateData={updateData} />}
                             </div>
                         </div>
