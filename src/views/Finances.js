@@ -2,20 +2,24 @@
 window.Views = window.Views || {};
 
 window.Views.Finances = ({ finances, addData, userProfile }) => {
-    // 1. HOOKS INICIALES (Orden estricto, sin condiciones antes)
-    const { useState, useMemo } = React;
+    // 1. IMPORTACIONES Y HOOKS (SIEMPRE PRIMERO - NO MOVER DE AQUÍ)
+    const { useState, useMemo, useEffect } = React;
     const Utils = window.Utils || {};
     const { Card, Button, Modal, Input, Select, DateFilter, formatCurrency, formatDate, Icon, SmartSelect, compressImage } = Utils;
+    
+    // Acceso seguro a librería de gráficos
+    const Recharts = window.Recharts || null;
 
-    // Estado de la UI
+    // --- ESTADOS (HOOKS) ---
     const [currentDate, setCurrentDate] = useState(new Date());
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [tabView, setTabView] = useState('dashboard');
+    const [tabView, setTabView] = useState('dashboard'); // 'dashboard' | 'list'
     const [receiptModal, setReceiptModal] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
-    const [showBalance, setShowBalance] = useState(true); // Ojo para ocultar saldos
-    
-    // Seguridad PIN
+    const [showBalance, setShowBalance] = useState(true);
+    const [filterType, setFilterType] = useState('all');
+
+    // Estado para PIN de Seguridad
     const [isLocked, setIsLocked] = useState(true);
     const [pinInput, setPinInput] = useState('');
     const [errorPin, setErrorPin] = useState(false);
@@ -28,29 +32,31 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
     };
     const [form, setForm] = useState(initialForm);
 
-    // Categorías para gastos
     const categories = [
         { value: 'General', label: 'General / Varios' },
         { value: 'Mantenimiento', label: 'Infraestructura' },
-        { value: 'Honorarios', label: 'Honorarios / Invitados' },
-        { value: 'Alquiler', label: 'Alquiler y Servicios' },
+        { value: 'Honorarios', label: 'Honorarios' },
+        { value: 'Alquiler', label: 'Alquiler/Servicios' },
         { value: 'Ayuda Social', label: 'Ayuda Social' },
         { value: 'Ministerios', label: 'Ministerios' },
         { value: 'Ofrenda Misionera', label: 'Ofrenda Misionera' }
     ];
 
-    // --- CÁLCULOS DE DATOS ---
+    // --- CÁLCULOS (MEMOS) ---
     
     // 1. Saldos Globales (Históricos)
     const globalBalances = useMemo(() => {
         let cash = 0, bank = 0;
         if (finances) {
             finances.forEach(f => {
+                // Validación numérica segura para evitar NaN
+                const safeNum = (val) => Number(val) || 0;
+                
                 if (f.type === 'Culto') { 
-                    cash += (Number(f.tithesCash||0) + Number(f.offeringsCash||0)); 
-                    bank += (Number(f.tithesTransfer||0) + Number(f.offeringsTransfer||0)); 
+                    cash += (safeNum(f.tithesCash) + safeNum(f.offeringsCash)); 
+                    bank += (safeNum(f.tithesTransfer) + safeNum(f.offeringsTransfer)); 
                 } else { 
-                    const val = Number(f.amount||0); 
+                    const val = safeNum(f.amount); 
                     if (f.method === 'Banco') bank += val; else cash += val; 
                 }
             });
@@ -58,50 +64,66 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         return { cash, bank, total: cash + bank };
     }, [finances]);
 
-    // 2. Datos del Mes Seleccionado (Para lista y gráfico de torta)
+    // 2. Datos del Mes Seleccionado
     const monthlyData = useMemo(() => {
         if (!finances) return [];
         const monthStr = currentDate.toISOString().slice(0, 7);
-        return finances.filter(f => f.date && f.date.startsWith(monthStr)).sort((a,b) => new Date(b.date) - new Date(a.date));
+        return finances
+            .filter(f => f.date && f.date.startsWith(monthStr))
+            .sort((a,b) => new Date(b.date) - new Date(a.date));
     }, [finances, currentDate]);
 
-    // 3. Datos para Gráficos (Tendencia 6 meses)
+    // 3. Datos para Gráficos
     const chartData = useMemo(() => {
-        // Aseguramos formato seguro para Recharts
+        if (!Recharts || !finances) return { trend: [], pie: [] };
+        
         const trendMap = {};
-        // Crear últimos 6 meses vacíos
+        // Inicializar últimos 6 meses
         for(let i=5; i>=0; i--) { 
             const d = new Date(); d.setMonth(d.getMonth() - i); 
             const key = d.toISOString().slice(0,7);
-            // IMPORTANTE: Usamos un label corto para el eje X
-            trendMap[key] = { name: key, label: Utils.formatDate ? Utils.formatDate(d.toISOString().slice(0,10), 'month') : key, ingresos: 0, gastos: 0 }; 
+            const label = Utils.formatDate ? Utils.formatDate(d.toISOString().slice(0,10), 'month') : key;
+            trendMap[key] = { name: key, label: label, ingresos: 0, gastos: 0 }; 
         }
 
-        if (finances) {
-            finances.forEach(f => {
-                if(!f.date) return;
-                const key = f.date.slice(0, 7);
-                if (trendMap[key]) {
-                    let val = f.type === 'Culto' ? (Number(f.tithesCash||0)+Number(f.tithesTransfer||0)+Number(f.offeringsCash||0)+Number(f.offeringsTransfer||0)) : Number(f.amount||0);
-                    if (val > 0) trendMap[key].ingresos += val; else trendMap[key].gastos += Math.abs(val);
+        finances.forEach(f => {
+            if(!f.date) return;
+            const key = f.date.slice(0, 7);
+            const safeNum = (val) => Number(val) || 0;
+            
+            if (trendMap[key]) {
+                let val = 0;
+                let isIncome = false;
+                
+                if (f.type === 'Culto') {
+                    val = safeNum(f.tithesCash) + safeNum(f.tithesTransfer) + safeNum(f.offeringsCash) + safeNum(f.offeringsTransfer);
+                    isIncome = true;
+                } else {
+                    val = safeNum(f.amount);
+                    isIncome = val > 0;
                 }
-            });
-        }
 
-        // Datos Torta (Mes actual)
+                if (isIncome) trendMap[key].ingresos += Math.abs(val);
+                else trendMap[key].gastos += Math.abs(val);
+            }
+        });
+
+        // Torta de Gastos
         const pieMap = {};
-        monthlyData.filter(f => (f.amount < 0) || (f.total < 0)).forEach(f => {
+        monthlyData.filter(f => {
+            const val = Number(f.total || f.amount || 0);
+            return val < 0;
+        }).forEach(f => {
             const cat = f.category || 'General';
             const val = Math.abs(Number(f.total || f.amount || 0));
             pieMap[cat] = (pieMap[cat] || 0) + val;
         });
 
         return { 
-            trend: Object.values(trendMap), 
+            trend: Object.values(trendMap).sort((a,b) => a.name.localeCompare(b.name)), 
             pie: Object.entries(pieMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value)
         };
-    }, [monthlyData, currentDate, finances]);
-
+    }, [monthlyData, currentDate, Recharts, finances]);
 
     // --- HANDLERS ---
     const handleUnlock = (e) => {
@@ -117,48 +139,56 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         try {
             const base64 = await compressImage(file);
             setForm(p => ({ ...p, attachmentUrl: base64 }));
-        } catch(err) { Utils.notify("Error al subir imagen", "error"); }
+        } catch(err) { Utils.notify("Error imagen", "error"); }
         setIsUploading(false);
     };
 
     const handleSave = () => {
         let final = { ...form, createdAt: new Date().toISOString() };
-        
+        const safeNum = (v) => Number(v) || 0;
+
         if(form.type === 'Culto') {
-            const total = Number(form.tithesCash||0)+Number(form.tithesTransfer||0)+Number(form.offeringsCash||0)+Number(form.offeringsTransfer||0);
-            if(total===0) return Utils.notify("El total no puede ser 0", "error");
-            final = { ...final, total, category: 'Culto' };
+            const total = safeNum(form.tithesCash) + safeNum(form.tithesTransfer) + safeNum(form.offeringsCash) + safeNum(form.offeringsTransfer);
+            if(total === 0) return Utils.notify("El total no puede ser 0", "error");
+            final = { ...final, total, category: 'Culto', tithersCount: safeNum(form.tithersCount) };
         } else {
-            const amt = Number(form.amount||0);
-            if(amt===0) return Utils.notify("Monto requerido", "error");
-            // Lógica de signos: Gasto negativo, Ingreso positivo
+            const amt = safeNum(form.amount);
+            if(amt === 0) return Utils.notify("Monto requerido", "error");
             const val = Math.abs(amt);
-            final = { ...final, amount: form.type==='Gasto' ? -val : val, total: form.type==='Gasto' ? -val : val };
+            // Si es gasto, negativo. Si es ingreso, positivo.
+            final = { ...final, amount: form.type === 'Gasto' ? -val : val, total: form.type === 'Gasto' ? -val : val };
         }
 
         addData('finances', final); 
         setIsModalOpen(false); 
         setForm(initialForm); 
-        Utils.notify("Movimiento registrado");
+        Utils.notify("Registrado con éxito");
     };
 
-    // --- RENDERIZADO SEGURO ---
-    const R = window.Recharts; // Acceso directo
-    const PIE_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6'];
-    const renderAmount = (amount) => showBalance ? formatCurrency(amount) : "$ ••••••";
+    const PIE_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#6366f1'];
+    const renderAmount = (amount) => showBalance ? formatCurrency(amount || 0) : "$ ••••••";
 
-    // 1. Validación Rol
+    // --- VALIDACIONES DE SEGURIDAD (AL FINAL, ANTES DE RENDER) ---
+    
+    // 1. Si no es Pastor, mostrar bloqueo
     if (userProfile?.role !== 'Pastor') {
-        return <div className="h-full flex items-center justify-center text-slate-500"><Icon name="LogOut" className="mr-2"/> Acceso exclusivo Pastoral</div>;
+        return (
+            <div className="h-full flex flex-col items-center justify-center text-center p-10">
+                <div className="bg-slate-100 p-4 rounded-full mb-4 text-slate-400"><Icon name="LogOut" size={40} /></div>
+                <h3 className="text-xl font-bold text-slate-700">Acceso Restringido</h3>
+                <p className="text-slate-500">Módulo exclusivo para Pastores.</p>
+            </div>
+        );
     }
 
-    // 2. Bloqueo PIN
+    // 2. Si está bloqueado por PIN
     if (isLocked) {
         return (
             <div className="h-full flex flex-col items-center justify-center animate-enter">
                 <div className="bg-white p-8 rounded-3xl shadow-soft max-w-sm w-full text-center border border-slate-100">
                     <div className="bg-brand-100 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-brand-600 mb-6"><Icon name="Wallet" size={32}/></div>
                     <h2 className="text-2xl font-extrabold text-slate-800 mb-2">Billetera Digital</h2>
+                    <p className="text-slate-500 mb-6 text-sm">PIN de Acceso: 1234</p>
                     <form onSubmit={handleUnlock} className="space-y-4">
                         <input type="password" inputMode="numeric" maxLength="4" className="text-center text-3xl tracking-[0.5em] font-bold w-full border-b-2 border-slate-200 focus:border-brand-500 outline-none py-2 text-slate-800" placeholder="••••" value={pinInput} autoFocus onChange={e => setPinInput(e.target.value)} />
                         {errorPin && <p className="text-red-500 text-xs font-bold">PIN Incorrecto</p>}
@@ -169,13 +199,13 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         );
     }
 
-    // 3. Vista Principal
+    // --- RENDERIZADO PRINCIPAL ---
     return (
         <div className="space-y-8 fade-in pb-24">
-            {/* CABECERA */}
+            {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="flex items-center gap-3">
-                    <h2 className="text-2xl font-extrabold text-slate-800">Billetera</h2>
+                    <h2 className="text-2xl font-extrabold text-slate-800">Mi Billetera</h2>
                     <button onClick={()=>setShowBalance(!showBalance)} className="text-slate-400 hover:text-brand-600"><Icon name={showBalance?"Search":"LogOut"} size={20}/></button>
                 </div>
                 <div className="flex gap-2">
@@ -187,28 +217,23 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                 </div>
             </div>
 
-            {/* TARJETAS DE SALDO */}
+            {/* Tarjetas Saldos */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-slate-900 text-white p-6 rounded-3xl shadow-lg relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-10"><Icon name="Wallet" size={80}/></div>
-                    <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Saldo Global</p>
-                    <h3 className="text-3xl font-black mt-1">{renderAmount(globalBalances.total)}</h3>
-                </div>
-                <Card className="border-l-4 border-l-emerald-500 py-4">
-                    <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Caja Chica (Efectivo)</p>
-                    <h3 className="text-2xl font-extrabold text-slate-800 mt-1">{renderAmount(globalBalances.cash)}</h3>
-                </Card>
-                <Card className="border-l-4 border-l-blue-500 py-4">
-                    <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Banco / Digital</p>
-                    <h3 className="text-2xl font-extrabold text-slate-800 mt-1">{renderAmount(globalBalances.bank)}</h3>
-                </Card>
+                <div className="bg-slate-900 text-white p-6 rounded-3xl shadow-lg relative overflow-hidden"><div className="absolute top-0 right-0 p-4 opacity-10"><Icon name="Wallet" size={80}/></div><p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Saldo Global</p><h3 className="text-4xl font-black mt-1">{renderAmount(globalBalances.total)}</h3></div>
+                <Card className="border-l-4 border-l-emerald-500 py-4"><p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Caja Chica (Efectivo)</p><h3 className="text-2xl font-extrabold text-slate-800 mt-1">{renderAmount(globalBalances.cash)}</h3></Card>
+                <Card className="border-l-4 border-l-blue-500 py-4"><p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Banco / Digital</p><h3 className="text-2xl font-extrabold text-slate-800 mt-1">{renderAmount(globalBalances.bank)}</h3></Card>
             </div>
 
-            {/* VISTA GRÁFICOS */}
+            <div className="flex justify-between items-center mt-6">
+                <h3 className="font-bold text-lg text-slate-800">Resumen Mensual</h3>
+                <DateFilter currentDate={currentDate} onChange={setCurrentDate} />
+            </div>
+
+            {/* DASHBOARD GRÁFICOS */}
             {tabView === 'dashboard' && (
                 <div className="space-y-6 animate-enter">
                     
-                    {/* Botón Generar Datos si está vacío */}
+                    {/* Botón Generar Demo si está vacío */}
                     {finances.length === 0 && (
                         <div className="text-center py-8 bg-slate-50 rounded-2xl border border-dashed border-slate-300">
                             <p className="text-slate-500 mb-2">No hay datos históricos.</p>
@@ -218,71 +243,60 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                         </div>
                     )}
 
-                    {/* GRÁFICOS (Solo si Recharts existe) */}
-                    {R ? (
+                    {Recharts ? (
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            {/* Flujo de Caja */}
                             <Card className="lg:col-span-2 h-80 flex flex-col">
                                 <h3 className="font-bold text-slate-800 mb-4 text-sm uppercase tracking-wide">Tendencia Semestral</h3>
                                 <div className="flex-1 w-full" style={{ minHeight: 0 }}>
-                                    <R.ResponsiveContainer width="100%" height="100%">
-                                        <R.AreaChart data={chartData.trend}>
-                                            <R.defs>
-                                                <linearGradient id="colorIng" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/><stop offset="95%" stopColor="#10b981" stopOpacity={0}/></linearGradient>
-                                                <linearGradient id="colorEgr" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ef4444" stopOpacity={0.2}/><stop offset="95%" stopColor="#ef4444" stopOpacity={0}/></linearGradient>
-                                            </R.defs>
-                                            <R.CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
-                                            <R.XAxis dataKey="label" tick={{fontSize:10}} axisLine={false} tickLine={false} />
-                                            <R.Tooltip contentStyle={{borderRadius:'12px', border:'none', boxShadow:'0 10px 15px rgba(0,0,0,0.1)'}} />
-                                            <R.Area type="monotone" dataKey="ingresos" stroke="#10b981" fillOpacity={1} fill="url(#colorIng)" strokeWidth={3} />
-                                            <R.Area type="monotone" dataKey="gastos" stroke="#ef4444" fillOpacity={1} fill="url(#colorEgr)" strokeWidth={3} />
-                                        </R.AreaChart>
-                                    </R.ResponsiveContainer>
+                                    <Recharts.ResponsiveContainer width="100%" height="100%">
+                                        <Recharts.AreaChart data={chartData.trend}>
+                                            <Recharts.defs><linearGradient id="colorIng" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/><stop offset="95%" stopColor="#10b981" stopOpacity={0}/></linearGradient><linearGradient id="colorEgr" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ef4444" stopOpacity={0.2}/><stop offset="95%" stopColor="#ef4444" stopOpacity={0}/></linearGradient></Recharts.defs>
+                                            <Recharts.CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
+                                            <Recharts.XAxis dataKey="label" tick={{fontSize:10}} axisLine={false} tickLine={false} />
+                                            <Recharts.Tooltip contentStyle={{borderRadius:'12px', border:'none', boxShadow:'0 10px 15px rgba(0,0,0,0.1)'}} />
+                                            <Recharts.Area type="monotone" dataKey="ingresos" stroke="#10b981" fillOpacity={1} fill="url(#colorIng)" strokeWidth={3} />
+                                            <Recharts.Area type="monotone" dataKey="gastos" stroke="#ef4444" fillOpacity={1} fill="url(#colorEgr)" strokeWidth={3} />
+                                        </Recharts.AreaChart>
+                                    </Recharts.ResponsiveContainer>
                                 </div>
                             </Card>
 
-                            {/* Gastos del Mes */}
                             <Card className="h-80 flex flex-col">
-                                <div className="flex justify-between items-center mb-2">
-                                    <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Gastos del Mes</h3>
-                                </div>
-                                {/* Selector de Fecha para filtrar Torta */}
-                                <div className="mb-2 scale-90 origin-left">
-                                    <DateFilter currentDate={currentDate} onChange={setCurrentDate} />
-                                </div>
-                                
+                                <h3 className="font-bold text-slate-800 mb-2 text-sm uppercase">Gastos del Mes</h3>
                                 <div className="flex-1 relative" style={{ minHeight: 0 }}>
                                     {chartData.pie.length > 0 ? (
-                                        <R.ResponsiveContainer width="100%" height="100%">
-                                            <R.PieChart>
-                                                <R.Pie data={chartData.pie} innerRadius={55} outerRadius={75} paddingAngle={5} dataKey="value">
-                                                    {chartData.pie.map((entry, index) => <R.Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />)}
-                                                </R.Pie>
-                                                <R.Tooltip />
-                                            </R.PieChart>
-                                        </R.ResponsiveContainer>
+                                        <Recharts.ResponsiveContainer width="100%" height="100%">
+                                            <Recharts.PieChart>
+                                                <Recharts.Pie data={chartData.pie} innerRadius={55} outerRadius={75} paddingAngle={5} dataKey="value">
+                                                    {chartData.pie.map((entry, index) => <Recharts.Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />)}
+                                                </Recharts.Pie>
+                                                <Recharts.Tooltip />
+                                            </Recharts.PieChart>
+                                        </Recharts.ResponsiveContainer>
                                     ) : (
                                         <div className="flex h-full items-center justify-center text-slate-400 text-xs italic">
-                                            Sin gastos en {formatDate(currentDate.toISOString().slice(0,10), 'month')}
+                                            Sin gastos en este mes
                                         </div>
                                     )}
                                 </div>
                             </Card>
                         </div>
                     ) : (
-                        <div className="p-4 bg-red-50 text-red-500 text-center rounded-xl border border-red-100">
-                            Error: Librería de gráficos no cargada. Revisa tu conexión.
-                        </div>
+                        <div className="p-4 bg-red-50 text-red-500 rounded-xl text-center">Error: Librería Gráfica no cargada.</div>
                     )}
                 </div>
             )}
 
-            {/* VISTA LISTA MOVIMIENTOS */}
+            {/* LISTA MOVIMIENTOS */}
             {tabView === 'list' && (
                 <div className="space-y-4 animate-enter">
                     <div className="flex justify-between items-center bg-white p-2 rounded-xl shadow-sm border border-slate-100">
-                        <span className="font-bold text-slate-700 ml-2">Filtrar por Mes:</span>
-                        <DateFilter currentDate={currentDate} onChange={setCurrentDate} />
+                        <span className="font-bold text-slate-700 ml-2">Filtrar:</span>
+                        <div className="flex gap-2">
+                            <button onClick={()=>setFilterType('all')} className={`px-3 py-1 rounded text-xs font-bold ${filterType==='all'?'bg-slate-800 text-white':'text-slate-500'}`}>Todos</button>
+                            <button onClick={()=>setFilterType('in')} className={`px-3 py-1 rounded text-xs font-bold ${filterType==='in'?'bg-emerald-500 text-white':'text-slate-500'}`}>Ingresos</button>
+                            <button onClick={()=>setFilterType('out')} className={`px-3 py-1 rounded text-xs font-bold ${filterType==='out'?'bg-red-500 text-white':'text-slate-500'}`}>Gastos</button>
+                        </div>
                     </div>
                     
                     <div className="bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden">
@@ -292,28 +306,37 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                                     <tr><th className="p-4">Fecha</th><th className="p-4">Concepto</th><th className="p-4">Origen</th><th className="p-4 text-right">Monto</th><th className="p-4"></th></tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {monthlyData.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-slate-400 italic">Sin movimientos en este mes.</td></tr>}
-                                    {monthlyData.map(f => {
+                                    {monthlyData.filter(f => {
+                                        const val = Number(f.total || f.amount || 0);
+                                        if (filterType === 'in') return val > 0;
+                                        if (filterType === 'out') return val < 0;
+                                        return true;
+                                    }).map(f => {
+                                        const isIncome = (Number(f.total || f.amount || 0)) > 0;
                                         const isCash = f.method === 'Efectivo' || (f.type === 'Culto' && (Number(f.tithesCash)>0 || Number(f.offeringsCash)>0));
-                                        const isBank = f.method === 'Banco' || (f.type === 'Culto' && (Number(f.tithesTransfer)>0 || Number(f.offeringsTransfer)>0));
+                                        
                                         return (
                                             <tr key={f.id} className="hover:bg-slate-50 transition-colors">
-                                                <td className="p-4 text-slate-600 whitespace-nowrap">{formatDate(f.date)}</td>
+                                                <td className="p-4 whitespace-nowrap text-slate-600">{formatDate(f.date)}</td>
                                                 <td className="p-4">
                                                     <div className="font-bold text-slate-800">{f.type==='Culto'?'Cierre Culto':f.category}</div>
-                                                    <div className="text-xs text-slate-400">{f.notes || (f.type==='Culto' ? `${f.tithersCount} sobres` : '')}</div>
+                                                    <div className="text-xs text-slate-500">{f.notes || (f.type==='Culto' ? `${f.tithersCount} sobres` : '')}</div>
                                                 </td>
                                                 <td className="p-4">
-                                                    <div className="flex gap-2">
-                                                        {isCash && <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-[10px] font-bold border border-emerald-100 flex items-center gap-1"><Icon name="DollarSign" size={10}/> Efec</span>}
-                                                        {isBank && <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-[10px] font-bold border border-blue-100 flex items-center gap-1"><Icon name="Briefcase" size={10}/> Dig</span>}
-                                                    </div>
+                                                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold border ${isCash ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>
+                                                        <Icon name={isCash ? "DollarSign" : "Briefcase"} size={10}/> {isCash ? "Efec" : "Dig"}
+                                                    </span>
                                                 </td>
-                                                <td className={`p-4 text-right font-mono font-bold ${(f.total||f.amount)<0?'text-red-600':'text-emerald-600'}`}>{formatCurrency(f.total||f.amount)}</td>
-                                                <td className="p-4 text-right">{f.attachmentUrl && <button onClick={()=>setReceiptModal(f.attachmentUrl)} className="text-blue-400 hover:text-blue-600"><Icon name="Image" size={16}/></button>}</td>
+                                                <td className={`p-4 text-right font-mono font-bold ${isIncome ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                    {isIncome ? '+' : ''}{formatCurrency(f.total || f.amount)}
+                                                </td>
+                                                <td className="p-4 text-right">
+                                                    {f.attachmentUrl && <button onClick={()=>setReceiptModal(f.attachmentUrl)} className="text-blue-400 hover:text-blue-600"><Icon name="Image" size={16}/></button>}
+                                                </td>
                                             </tr>
                                         );
                                     })}
+                                    {monthlyData.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-slate-400 italic">Sin movimientos.</td></tr>}
                                 </tbody>
                             </table>
                         </div>
@@ -321,40 +344,38 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                 </div>
             )}
 
-            {/* MODAL NUEVO */}
             <Modal isOpen={isModalOpen} onClose={()=>setIsModalOpen(false)} title="Registrar Movimiento">
-                <div className="space-y-5 max-h-[75vh] overflow-y-auto pr-2">
-                    <div className="grid grid-cols-3 gap-2 bg-slate-50 p-1 rounded-xl border border-slate-100 mb-2">
+                <div className="space-y-5 max-h-[80vh] overflow-y-auto pr-2">
+                    <div className="grid grid-cols-3 gap-2 bg-slate-50 p-1 rounded-xl border border-slate-100 mb-4">
                         {['Culto', 'Gasto', 'Ingreso'].map(t => (
                             <button key={t} onClick={()=>setForm({...initialForm, type: t})} className={`py-2 text-xs font-bold rounded-lg transition-all ${form.type===t ? 'bg-white shadow-sm text-brand-600' : 'text-slate-500 hover:text-slate-700'}`}>{t}</button>
                         ))}
                     </div>
-                    
                     <Input type="date" label="Fecha" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} />
 
                     {form.type === 'Culto' ? (
                         <div className="space-y-4">
                             <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-                                <h4 className="font-bold text-emerald-800 text-xs uppercase mb-3 flex items-center gap-2"><Icon name="DollarSign" size={14}/> Efectivo (Alfolí)</h4>
+                                <h4 className="font-bold text-emerald-800 text-xs uppercase mb-3 flex items-center gap-2"><Icon name="DollarSign" size={14}/> Efectivo</h4>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <Input label="Diezmos" type="number" value={form.tithesCash} onChange={e=>setForm({...form, tithesCash:e.target.value})} placeholder="$" />
-                                    <Input label="Ofrendas" type="number" value={form.offeringsCash} onChange={e=>setForm({...form, offeringsCash:e.target.value})} placeholder="$" />
+                                    <Input label="Diezmos" type="number" placeholder="$" value={form.tithesCash} onChange={e=>setForm({...form, tithesCash:e.target.value})} />
+                                    <Input label="Ofrendas" type="number" placeholder="$" value={form.offeringsCash} onChange={e=>setForm({...form, offeringsCash:e.target.value})} />
                                 </div>
                             </div>
                             <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                                <h4 className="font-bold text-blue-800 text-xs uppercase mb-3 flex items-center gap-2"><Icon name="Briefcase" size={14}/> Banco / Digital</h4>
+                                <h4 className="font-bold text-blue-800 text-xs uppercase mb-3 flex items-center gap-2"><Icon name="Briefcase" size={14}/> Banco</h4>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <Input label="Diezmos" type="number" value={form.tithesTransfer} onChange={e=>setForm({...form, tithesTransfer:e.target.value})} placeholder="$" />
-                                    <Input label="Ofrendas" type="number" value={form.offeringsTransfer} onChange={e=>setForm({...form, offeringsTransfer:e.target.value})} placeholder="$" />
+                                    <Input label="Diezmos" type="number" placeholder="$" value={form.tithesTransfer} onChange={e=>setForm({...form, tithesTransfer:e.target.value})} />
+                                    <Input label="Ofrendas" type="number" placeholder="$" value={form.offeringsTransfer} onChange={e=>setForm({...form, offeringsTransfer:e.target.value})} />
                                 </div>
                             </div>
                             <Input label="Cant. Sobres" type="number" value={form.tithersCount} onChange={e=>setForm({...form, tithersCount:e.target.value})} placeholder="Ej. 12" />
                         </div>
                     ) : (
                         <div className="space-y-4">
-                            <Input label="Monto" type="number" value={form.amount} onChange={e=>setForm({...form, amount:e.target.value})} className="text-lg font-mono" placeholder="$ 0.00" />
+                            <Input label="Monto" type="number" value={form.amount} onChange={e=>setForm({...form, amount:e.target.value})} className="text-lg" placeholder="$ 0.00" />
                             <div className="grid grid-cols-2 gap-4">
-                                <Select label="Origen" value={form.method} onChange={e=>setForm({...form, method:e.target.value})}><option value="Efectivo">Caja Chica</option><option value="Banco">Banco / App</option></Select>
+                                <Select label="Origen" value={form.method} onChange={e=>setForm({...form, method:e.target.value})}><option value="Efectivo">Efectivo</option><option value="Banco">Banco</option></Select>
                                 <SmartSelect label="Categoría" options={categories} value={form.category} onChange={v=>setForm({...form, category:v})} />
                             </div>
                         </div>
@@ -372,12 +393,11 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                     </div>
 
                     <div className="pt-2">
-                        <Button className="w-full py-3 shadow-lg shadow-brand-500/20" onClick={handleSave} disabled={isUploading}>Confirmar Operación</Button>
+                        <Button className="w-full py-3 shadow-lg shadow-brand-500/20" onClick={handleSave} disabled={isUploading}>Confirmar</Button>
                     </div>
                 </div>
             </Modal>
 
-            {/* Modal Foto */}
             <Modal isOpen={!!receiptModal} onClose={()=>setReceiptModal(null)} title="Comprobante">
                 <img src={receiptModal} className="w-full rounded-xl shadow-lg" alt="Comprobante" />
             </Modal>
