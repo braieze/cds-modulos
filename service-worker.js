@@ -1,3 +1,4 @@
+//
 const CACHE_NAME = 'conquistadores-v1';
 const urlsToCache = [
   './index.html',
