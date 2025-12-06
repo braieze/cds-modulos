@@ -259,7 +259,17 @@
                                 {activeTab === 'ebd' && <MinistryWithTasks title="Escuela Bíblica" col="ebd" filterMinistry="EBD" members={members} tasks={tasks} events={ebd} addData={addData} deleteData={deleteData} updateData={updateData} />}
                                 {activeTab === 'youth' && <MinistryWithTasks title="Jóvenes" col="youth" filterMinistry="Jóvenes" members={members} tasks={tasks} events={youth} addData={addData} deleteData={deleteData} updateData={updateData} />}
                                 {activeTab === 'servers' && <MinistryWithTasks title="Cuerpo de Servidores" col="servers" filterMinistry="Servidores" members={members} tasks={tasks} events={servers} addData={addData} deleteData={deleteData} updateData={updateData} />}
-                                {activeTab === 'calendar' && <GlobalCalendar worship={worship} youth={youth} ebd={ebd} servers={servers} tasks={tasks} />}
+                                {activeTab === 'calendar' && (
+                                    <GlobalCalendar 
+                                        worship={worship} 
+                                        youth={youth} 
+                                        ebd={ebd} 
+                                        servers={servers} 
+                                        tasks={tasks} 
+                                        userProfile={userProfile} 
+                                        addData={addData} 
+                                    />
+                                )}
                                 {activeTab === 'messages' && <Messaging messages={messages} members={members} userProfile={userProfile} addData={addData} updateData={updateData} />}
                                 {activeTab === 'blog' && <Blog userProfile={userProfile} addData={addData} deleteData={deleteData} updateData={updateData} />}
                             </div>
