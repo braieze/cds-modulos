@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Conquistadores App</title>
-    
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2563eb">
     
@@ -12,7 +11,7 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -54,6 +53,7 @@
 
     <script type="text/babel" src="src/Utils.js"></script>
     <script type="text/babel" src="src/DataLogic.js"></script>
+    
     <script type="text/babel" src="src/views/GlobalCalendar.js"></script>
     <script type="text/babel" src="src/views/EventDetails.js"></script>
     <script type="text/babel" src="src/views/Dashboard.js"></script>
@@ -69,8 +69,10 @@
     <div id="root"></div>
     <script type="text/babel">
         const { useState, useEffect } = React;
-        const { Icon, ToastContainer } = window.Utils || {};
-        const { useFirebaseListeners, addData, updateData, deleteData } = window.DataLogic || {};
+        const Utils = window.Utils || {};
+        const { Icon, ToastContainer } = Utils;
+        const DataLogic = window.DataLogic || {};
+        const { useFirebaseListeners, addData, updateData, deleteData } = DataLogic;
         const Views = window.Views || {};
         const { Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging, Blog, QuickActions } = Views;
 
@@ -85,14 +87,13 @@
         );
 
         const App = () => {
-            const [user, setUser] = useState(null);
-            const [profile, setProfile] = useState(null);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [userProfile, setUserProfile] = useState(null);
             const [loading, setLoading] = useState(true);
             const [activeTab, setActiveTab] = useState('dashboard');
             const [sidebarOpen, setSidebarOpen] = useState(false);
             const [data, setData] = useState({ members:[], finances:[], worship:[], songs:[], ebd:[], youth:[], tasks:[], servers:[], messages:[], posts:[] });
 
-            // Setters individuales para compatibilidad
             const setters = {
                 members: v=>setData(p=>({...p, members:v})), finances: v=>setData(p=>({...p, finances:v})), worship: v=>setData(p=>({...p, worship:v})),
                 songs: v=>setData(p=>({...p, songs:v})), ebd: v=>setData(p=>({...p, ebd:v})), youth: v=>setData(p=>({...p, youth:v})),
@@ -106,7 +107,6 @@
                         const q = await window.db.collection('members').where('email', '==', u.email).get();
                         if (!q.empty) setProfile({ ...q.docs[0].data(), id: q.docs[0].id });
                         else {
-                             // Auto-crear admin
                              const adm = { name: u.displayName, email: u.email, role: 'Pastor', ministry: 'General', photo: u.photoURL, status: 'Activo' };
                              await window.db.collection('members').add(adm); setProfile(adm);
                         }
@@ -116,7 +116,6 @@
             }, []);
 
             useFirebaseListeners(profile, setters);
-
             const login = () => window.auth.signInWithPopup(window.googleProvider);
             const logout = () => window.auth.signOut();
 
@@ -134,7 +133,7 @@
                     {ToastContainer && <ToastContainer />}
                     <aside className={`fixed inset-y-0 left-0 z-40 w-72 bg-white border-r border-slate-100 transition-transform duration-300 md:relative md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                         <div className="p-6 flex flex-col h-full">
-                            <div className="flex items-center gap-3 mb-8"><div className="bg-brand-600 text-white p-2 rounded-xl shadow-glow">{Icon && <Icon name="Home"/>}</div><span className="font-extrabold text-xl tracking-tight">Conquistadores</span></div>
+                            <div className="flex items-center gap-3 mb-8"><div className="bg-brand-600 text-white p-2 rounded-xl shadow-glow">{Icon && <Icon name="Home"/>}</div><span className="font-extrabold text-xl tracking-tight text-slate-800">Conquistadores</span></div>
                             <nav className="flex-1 overflow-y-auto hide-scroll space-y-1">
                                 <NavItem id="dashboard" icon="Home" label="Inicio" />
                                 <NavItem id="calendar" icon="Calendar" label="Calendario" />
@@ -153,7 +152,7 @@
                         </div>
                     </aside>
                     <main className="flex-1 flex flex-col h-screen overflow-hidden relative w-full">
-                        <header className="md:hidden bg-white/80 backdrop-blur p-4 border-b flex justify-between items-center z-20"><span className="font-bold text-lg">Conquistadores</span><button onClick={()=>setSidebarOpen(true)}>{Icon && <Icon name="Menu"/>}</button></header>
+                        <header className="md:hidden bg-white/80 backdrop-blur p-4 border-b flex justify-between items-center z-20"><span className="font-bold text-lg text-slate-800">Conquistadores</span><button onClick={()=>setSidebarOpen(true)} className="text-slate-600">{Icon && <Icon name="Menu"/>}</button></header>
                         <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24">
                             <div className="max-w-6xl mx-auto">
                                 {activeTab==='dashboard' && Dashboard && <Dashboard userProfile={profile} {...data} updateData={updateData} setActiveTab={setActiveTab} />}
