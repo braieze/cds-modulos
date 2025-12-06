@@ -10,9 +10,13 @@
     
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
     <script src="https://cdn.tailwindcss.com"></script>
+    
     <script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
+    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -20,16 +24,12 @@
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700&display=swap" rel="stylesheet">
     
     <script>
         tailwind.config = {
             theme: {
                 extend: {
-                    fontFamily: { 
-                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
-                        serif: ['"Merriweather"', 'serif'] 
-                    },
+                    fontFamily: { sans: ['"Plus Jakarta Sans"', 'sans-serif'] },
                     colors: {
                         brand: { 50:'#eff6ff', 100:'#dbeafe', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8', 900:'#1e3a8a' },
                         accent: { 500: '#f59e0b', 600: '#d97706' }, 
@@ -62,10 +62,6 @@
             animation: skeleton-loading 1.5s infinite;
         }
         @keyframes skeleton-loading { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-        
-        /* Compatibilidad Inputs */
-        .input-modern { @apply w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-all shadow-input outline-none; }
-        .label-modern { @apply block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1; }
     </style>
 
     <script>
@@ -78,16 +74,16 @@
             appId: "1:518647225464:web:b3344ca5172498187e218d"
         };
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        
+        // Variables Globales
         window.db = firebase.firestore();
         window.auth = firebase.auth();
         window.googleProvider = new firebase.auth.GoogleAuthProvider();
 
-        // Registro Service Worker PWA
+        // PWA Register
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./service-worker.js')
-                    .then(reg => console.log('SW registrado', reg))
-                    .catch(err => console.log('SW fallo', err));
+                navigator.serviceWorker.register('./service-worker.js').catch(err => console.log('SW error:', err));
             });
         }
     </script>
@@ -96,30 +92,37 @@
     <script type="text/babel" src="src/DataLogic.js"></script>
     
     <script type="text/babel" src="src/views/GlobalCalendar.js"></script>
-    <script type="text/babel" src="src/views/EventDetails.js"></script> <script type="text/babel" src="src/views/Dashboard.js"></script>
+    <script type="text/babel" src="src/views/EventDetails.js"></script>
+    <script type="text/babel" src="src/views/Dashboard.js"></script>
     <script type="text/babel" src="src/views/Directory.js"></script>
     <script type="text/babel" src="src/views/Finances.js"></script>
     <script type="text/babel" src="src/views/Worship.js"></script>
     <script type="text/babel" src="src/views/MinistryWithTasks.js"></script>
     <script type="text/babel" src="src/views/Messaging.js"></script>
-    <script type="text/babel" src="src/views/Blog.js"></script> </head>
+    <script type="text/babel" src="src/views/Blog.js"></script>
+    <script type="text/babel" src="src/views/QuickActions.js"></script>
+</head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
-        const { Icon, Button, ToastContainer } = window.Utils;
-        const { useFirebaseListeners, addData, updateData, deleteData } = window.DataLogic;
+        // Importación segura de dependencias globales
+        const Utils = window.Utils || {};
+        const { Icon, Button, ToastContainer } = Utils;
+        const DataLogic = window.DataLogic || {};
+        const { useFirebaseListeners, addData, updateData, deleteData } = DataLogic;
         
-        // Importamos Vistas
-        const { Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging, Blog } = window.Views;
+        // Vistas
+        const Views = window.Views || {};
+        const { Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging, Blog, QuickActions } = Views;
 
-        // Login Screen
+        // --- PANTALLA LOGIN ---
         const LoginScreen = ({ onLogin, loading, error }) => (
             <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
                 <div className="bg-white p-8 rounded-3xl shadow-soft max-w-sm w-full text-center animate-enter">
                     <div className="bg-brand-600 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-glow">
-                        <Icon name="Home" size={32}/>
+                        {Icon && <Icon name="Home" size={32}/>}
                     </div>
                     <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">Conquistadores</h1>
                     <p className="text-slate-500 mb-6 font-medium">Sistema de Gestión Integral</p>
@@ -131,6 +134,7 @@
             </div>
         );
 
+        // --- APP PRINCIPAL ---
         const App = () => {
             const [currentUser, setCurrentUser] = useState(null);
             const [userProfile, setUserProfile] = useState(null);
@@ -139,7 +143,7 @@
             const [activeTab, setActiveTab] = useState('dashboard');
             const [sidebarOpen, setSidebarOpen] = useState(false);
 
-            // Datos (Estados)
+            // Colecciones de Datos
             const [members, setMembers] = useState([]);
             const [finances, setFinances] = useState([]);
             const [worship, setWorship] = useState([]);
@@ -149,35 +153,39 @@
             const [tasks, setTasks] = useState([]);
             const [servers, setServers] = useState([]);
             const [messages, setMessages] = useState([]);
+            const [posts, setPosts] = useState([]); // Para Blog en Dashboard
 
-            // Auth
+            // Listener Auth
             useEffect(() => {
                 const unsubscribe = window.auth.onAuthStateChanged(async (user) => {
                     if (user) {
                         setCurrentUser(user);
-                        const q = window.db.collection('members').where('email', '==', user.email);
-                        const snapshot = await q.get();
-                        if (!snapshot.empty) {
-                            setUserProfile({ ...snapshot.docs[0].data(), id: snapshot.docs[0].id });
-                        } else {
-                            const checkEmpty = await window.db.collection('members').get();
-                            if(checkEmpty.empty) {
-                                const newAdmin = { name: user.displayName, email: user.email, role: 'Pastor', ministry: 'Pastoral', photo: user.photoURL, status: 'Activo' };
-                                await window.db.collection('members').add(newAdmin);
-                                setUserProfile(newAdmin);
+                        try {
+                            const q = window.db.collection('members').where('email', '==', user.email);
+                            const snapshot = await q.get();
+                            if (!snapshot.empty) {
+                                setUserProfile({ ...snapshot.docs[0].data(), id: snapshot.docs[0].id });
                             } else {
-                                setUserProfile(null); setAuthError("Tu email no está registrado.");
+                                const checkEmpty = await window.db.collection('members').get();
+                                if(checkEmpty.empty) {
+                                    const newAdmin = { name: user.displayName, email: user.email, role: 'Pastor', ministry: 'General', photo: user.photoURL, status: 'Activo' };
+                                    await window.db.collection('members').add(newAdmin);
+                                    setUserProfile(newAdmin);
+                                } else {
+                                    setAuthError("Tu email no está registrado.");
+                                }
                             }
-                        }
+                        } catch (err) { setAuthError("Error de conexión"); }
                     } else { setCurrentUser(null); setUserProfile(null); }
                     setLoadingAuth(false);
                 });
                 return () => unsubscribe();
             }, []);
 
+            // Listeners de Datos
             useFirebaseListeners(userProfile, {
                 members: setMembers, finances: setFinances, worship: setWorship, songs: setSongs,
-                ebd: setEbd, youth: setYouth, tasks: setTasks, servers: setServers, messages: setMessages
+                ebd: setEbd, youth: setYouth, tasks: setTasks, servers: setServers, messages: setMessages, posts: setPosts
             });
 
             const handleLogin = async () => { try { await window.auth.signInWithPopup(window.googleProvider); } catch(e) { setAuthError("Error Google"); } };
@@ -186,6 +194,7 @@
             if (loadingAuth) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse">Cargando sistema...</div>;
             if (!currentUser || !userProfile) return <LoginScreen onLogin={handleLogin} loading={loadingAuth} error={authError} />;
 
+            // Componente NavItem interno
             const NavItem = ({ id, label, icon }) => (
                 <button onClick={() => { setActiveTab(id); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all mb-1 ${activeTab === id ? 'bg-brand-50 text-brand-600 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
                     <Icon name={icon} /> {label}
@@ -207,7 +216,7 @@
                             <nav className="space-y-1 flex-1 overflow-y-auto hide-scroll">
                                 <NavItem id="dashboard" icon="Home" label="Inicio" />
                                 <NavItem id="calendar" icon="Calendar" label="Calendario" />
-                                <NavItem id="blog" icon="Book" label="Devocionales" /> {/* NUEVO ITEM */}
+                                <NavItem id="blog" icon="Book" label="Devocionales" />
                                 
                                 <div className="mt-6 mb-2 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Ministerios</div>
                                 {(userProfile.role === 'Pastor' || userProfile.ministry === 'Alabanza') && <NavItem id="worship" icon="Music" label="Alabanza" />}
@@ -247,29 +256,19 @@
                                 {activeTab === 'members' && <Directory members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
                                 {activeTab === 'worship' && <Worship worship={worship} songs={songs} members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
                                 {activeTab === 'finances' && <Finances finances={finances} addData={addData} userProfile={userProfile} />}
-                                {activeTab === 'ebd' && <MinistryWithTasks title="Escuela Bíblica" col="ebd" filterMinistry="EBD" members={members} tasks={tasks} events={ebd} addData={addData} deleteData={deleteData} />}
-                                {activeTab === 'youth' && <MinistryWithTasks title="Jóvenes" col="youth" filterMinistry="Jóvenes" members={members} tasks={tasks} events={youth} addData={addData} deleteData={deleteData} />}
+                                {activeTab === 'ebd' && <MinistryWithTasks title="Escuela Bíblica" col="ebd" filterMinistry="EBD" members={members} tasks={tasks} events={ebd} addData={addData} deleteData={deleteData} updateData={updateData} />}
+                                {activeTab === 'youth' && <MinistryWithTasks title="Jóvenes" col="youth" filterMinistry="Jóvenes" members={members} tasks={tasks} events={youth} addData={addData} deleteData={deleteData} updateData={updateData} />}
+                                {activeTab === 'servers' && <MinistryWithTasks title="Cuerpo de Servidores" col="servers" filterMinistry="Servidores" members={members} tasks={tasks} events={servers} addData={addData} deleteData={deleteData} updateData={updateData} />}
                                 {activeTab === 'calendar' && <GlobalCalendar worship={worship} youth={youth} ebd={ebd} servers={servers} tasks={tasks} />}
                                 {activeTab === 'messages' && <Messaging messages={messages} members={members} userProfile={userProfile} addData={addData} updateData={updateData} />}
-                                {activeTab === 'blog' && <Blog userProfile={userProfile} addData={addData} deleteData={deleteData} />}
-                                
-                                {activeTab === 'servers' && (
-                                    <MinistryWithTasks 
-                                        title="Cuerpo de Servidores" 
-                                        col="servers" 
-                                        filterMinistry="Servidores" 
-                                        members={members} 
-                                        tasks={tasks} 
-                                        events={servers} 
-                                        addData={addData} 
-                                        deleteData={deleteData} 
-                                        updateData={updateData}
-                                    />
-                                )}
+                                {activeTab === 'blog' && <Blog userProfile={userProfile} addData={addData} deleteData={deleteData} updateData={updateData} />}
                             </div>
                         </div>
                     </main>
                     
+                    {/* Botón Flotante */}
+                    <QuickActions userProfile={userProfile} setActiveTab={setActiveTab} />
+
                     {sidebarOpen && <div className="fixed inset-0 bg-slate-900/50 z-30 md:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)}></div>}
                 </div>
             );
