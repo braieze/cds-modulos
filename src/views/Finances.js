@@ -6,6 +6,7 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
     const { useState, useMemo, useEffect } = React;
     const Utils = window.Utils || {};
     const { Card, Button, Modal, Input, Select, DateFilter, formatCurrency, formatDate, Icon, SmartSelect, compressImage } = Utils;
+    const { useRef, useState, useEffect } = React; // Agrega esta línea al inicio
     
     // Estados UI
     const [currentDate, setCurrentDate] = useState(new Date());
