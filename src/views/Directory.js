@@ -3,7 +3,7 @@ window.Views = window.Views || {};
 
 window.Views.Directory = ({ members, directory, userProfile }) => {
     // 1. HOOKS Y UTILIDADES
-    const { useState, useMemo } = React;
+    const { useState, useMemo, useRef } = React;
     const Utils = window.Utils || {};
     const { Icon } = Utils;
 
@@ -11,13 +11,15 @@ window.Views.Directory = ({ members, directory, userProfile }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedMember, setSelectedMember] = useState(null); // Modal de credencial
     const [isFlipped, setIsFlipped] = useState(false); // Efecto 3D
+    const [isDownloading, setIsDownloading] = useState(false);
+    
+    // Referencia para la impresión
+    const cardRef = useRef(null);
 
-    // 3. UNIFICACIÓN DE DATOS
-    // Aceptamos 'members' o 'directory' para asegurar compatibilidad con tu App.js
+    // 3. DATOS
     const dataList = Array.isArray(members) ? members : (Array.isArray(directory) ? directory : []);
 
-    // 4. HELPER INTELIGENTE DE DATOS
-    // Esto busca el dato correcto aunque el campo tenga nombres distintos en tu base de datos
+    // 4. HELPER DE DATOS
     const getField = (item, ...keys) => {
         for (let key of keys) {
             if (item[key]) return item[key];
@@ -25,7 +27,7 @@ window.Views.Directory = ({ members, directory, userProfile }) => {
         return null;
     };
 
-    // Filtro de búsqueda
+    // Filtro
     const filteredMembers = useMemo(() => {
         const term = searchTerm.toLowerCase();
         return dataList.filter(m => {
@@ -38,160 +40,209 @@ window.Views.Directory = ({ members, directory, userProfile }) => {
         });
     }, [dataList, searchTerm]);
 
-    // Calcular edad
+    // Helpers de Formato
     const calculateAge = (dateString) => {
-        if (!dateString) return '-';
+        if (!dateString) return null;
         const today = new Date();
         const birthDate = new Date(dateString);
         let age = today.getFullYear() - birthDate.getFullYear();
         const m = today.getMonth() - birthDate.getMonth();
-        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-            age--;
-        }
-        return isNaN(age) ? '-' : age;
+        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
+        return isNaN(age) ? null : age;
     };
 
-    // Abrir WhatsApp
-    const openWhatsApp = (phone) => {
-        if (!phone) return;
-        const p = phone.replace(/\D/g, ''); // Limpiar caracteres no numéricos
-        window.open(`https://wa.me/${p}`, '_blank');
-    };
-
-    // Obtener foto o avatar
     const getPhoto = (photoUrl, name) => {
         if (photoUrl) return photoUrl;
-        return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=f1f5f9&color=64748b&size=128`;
+        return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=f1f5f9&color=64748b&size=256`;
+    };
+
+    // --- FUNCIÓN DE DESCARGA PDF ---
+    const downloadPDF = async () => {
+        if (!selectedMember || !cardRef.current) return;
+        setIsDownloading(true);
+
+        try {
+            // Cargar librería dinámicamente si no existe
+            if (!window.html2pdf) {
+                await new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+                    script.onload = resolve;
+                    script.onerror = reject;
+                    document.head.appendChild(script);
+                });
+            }
+
+            const element = cardRef.current;
+            const opt = {
+                margin: 0,
+                filename: `Credencial_${selectedMember.name || 'Miembro'}.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2, useCORS: true, logging: true },
+                jsPDF: { unit: 'mm', format: [55, 88], orientation: 'portrait' } // Tamaño tarjeta estándar CR80
+            };
+
+            // Hack: Renderizar el lado frontal y trasero secuencialmente para el PDF o simplemente el visible
+            // Para simplificar, generaremos un PDF de la vista actual (Frente o Dorso)
+            // Lo ideal para impresión es descargar ambos lados. 
+            // Aquí descargaremos lo que el usuario está viendo actualmente.
+            await window.html2pdf().set(opt).from(element).save();
+
+        } catch (error) {
+            console.error("Error generando PDF", error);
+            alert("Hubo un error al generar el PDF. Intenta nuevamente.");
+        }
+        setIsDownloading(false);
     };
 
     // --- RENDERIZADO DE LA CREDENCIAL ---
     const renderCredential = (m) => {
         if (!m) return null;
 
-        // Extracción segura de datos usando el helper
         const id = m.id || 'ID-000';
         const name = getField(m, 'name', 'nombre') || 'Sin Nombre';
+        // Dividir nombre en dos líneas si es muy largo para el estilo visual
+        const nameParts = name.split(' ');
+        const firstName = nameParts[0];
+        const lastName = nameParts.slice(1).join(' ');
+
         const role = getField(m, 'role', 'rol', 'cargo') || 'Miembro';
         const photo = getPhoto(getField(m, 'photo', 'foto', 'avatar', 'img'), name);
         const birthDate = getField(m, 'birthDate', 'fechaNacimiento', 'nacimiento', 'dob');
         const age = calculateAge(birthDate);
         const blood = getField(m, 'bloodGroup', 'grupoSanguineo', 'sangre') || '-';
-        const phone = getField(m, 'phone', 'telefono', 'celular', 'whatsapp');
         const email = getField(m, 'email', 'correo', 'mail');
-        const address = getField(m, 'address', 'direccion', 'domicilio', 'localidad');
-        const emerContact = getField(m, 'emergencyContact', 'contactoEmergencia', 'contacto_emergencia');
-        const emerPhone = getField(m, 'emergencyPhone', 'telefonoEmergencia', 'telefono_emergencia');
-        const joined = getField(m, 'joinedDate', 'fechaIngreso', 'createdAt') || '-';
+        const phone = getField(m, 'phone', 'telefono', 'celular');
+        const emerContact = getField(m, 'emergencyContact', 'contactoEmergencia');
+        const emerPhone = getField(m, 'emergencyPhone', 'telefonoEmergencia');
+        const address = getField(m, 'address', 'direccion', 'domicilio');
 
-        // QR con ID para futuros módulos
         const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${id}`;
 
         return (
-            <div className="perspective-1000 w-[320px] h-[520px] cursor-pointer group select-none" onClick={() => setIsFlipped(!isFlipped)}>
+            <div className="perspective-1000 w-[320px] h-[510px] cursor-pointer group select-none relative" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
+                
+                {/* Contenedor Giratorio */}
                 <div className={`relative w-full h-full duration-700 transform-style-3d transition-all ${isFlipped ? 'rotate-y-180' : ''}`}>
                     
-                    {/* --- FRENTE --- */}
-                    <div className="absolute w-full h-full backface-hidden bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 flex flex-col items-center pt-8 pb-4 px-6">
-                        {/* Diseño superior */}
-                        <div className="absolute top-4 w-12 h-3 bg-slate-200 rounded-full mx-auto left-0 right-0 shadow-inner"></div>
-                        <div className="absolute -top-10 -left-10 w-32 h-32 bg-brand-500/10 rounded-full blur-3xl"></div>
+                    {/* --- FRENTE (Estilo AdvertHive adaptado) --- */}
+                    <div ref={!isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden bg-white rounded-[2rem] shadow-2xl overflow-hidden flex flex-col border border-slate-100">
                         
-                        <div className="text-center mb-5 z-10">
-                            <h3 className="text-[10px] font-black tracking-[0.3em] text-slate-400 uppercase">CREDENTIAL</h3>
-                            <div className="h-1 w-6 bg-brand-500 mx-auto mt-2 rounded-full"></div>
+                        {/* 1. Header & Agujero Lanyard */}
+                        <div className="relative pt-6 px-6 pb-2 flex justify-between items-start z-20">
+                            <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">CONQUISTADORES</span>
+                            <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase opacity-50">2025</span>
+                            
+                            {/* Agujero virtual */}
+                            <div className="absolute top-4 left-1/2 -translate-x-1/2 w-12 h-3 bg-slate-200 rounded-full shadow-inner"></div>
+                            {/* Gancho metálico decorativo */}
+                            <div className="absolute top-[-10px] left-1/2 -translate-x-1/2 w-4 h-8 border-x-2 border-b-2 border-slate-300 rounded-b-full z-0"></div>
                         </div>
 
-                        <div className="w-32 h-32 rounded-2xl p-1 bg-gradient-to-br from-brand-400 to-indigo-500 shadow-xl mb-4">
-                            <img src={photo} className="w-full h-full object-cover rounded-xl bg-white" alt={name} onError={(e) => e.target.src = getPhoto(null, name)}/>
-                        </div>
-
-                        <div className="text-center space-y-1 mb-2 w-full">
-                            <h2 className="text-2xl font-extrabold text-slate-800 leading-tight truncate px-2">{name}</h2>
-                            <span className="inline-block px-3 py-1 bg-brand-50 text-brand-700 text-[10px] font-bold rounded-full uppercase tracking-wider shadow-sm border border-brand-100">
-                                {role}
-                            </span>
-                        </div>
-
-                        <div className="mt-auto w-full bg-slate-50 p-3 rounded-2xl border border-slate-200 flex items-center justify-between gap-3">
-                            <div className="text-left overflow-hidden">
-                                <p className="text-[9px] text-slate-400 font-bold uppercase">ID ÚNICO</p>
-                                <p className="text-xs font-mono font-bold text-slate-600 truncate">{id}</p>
-                            </div>
-                            <div className="shrink-0 bg-white p-1 rounded-lg border border-slate-100">
-                                <img src={qrUrl} className="w-12 h-12 mix-blend-multiply opacity-90" alt="QR" />
+                        {/* 2. Nombres Grandes */}
+                        <div className="px-6 mt-2 z-20">
+                            <h2 className="text-4xl font-black text-slate-800 leading-[0.9] tracking-tight">{firstName}</h2>
+                            <h2 className="text-4xl font-black text-brand-600 leading-[0.9] tracking-tight">{lastName}</h2>
+                            
+                            {/* Badge de Rol con Icono */}
+                            <div className="mt-3 inline-flex items-center gap-2">
+                                <div className="bg-amber-500 text-white p-1 rounded-full">
+                                    <Icon name="ArrowRight" size={12} strokeWidth={4} />
+                                </div>
+                                <span className="font-bold text-slate-600 uppercase tracking-wider text-sm">{role}</span>
                             </div>
                         </div>
+
+                        {/* 3. Elementos Decorativos Geométricos */}
+                        <div className="absolute top-32 left-6 flex gap-1 z-10">
+                            <div className="w-8 h-8 rounded-full bg-brand-600"></div>
+                            <div className="w-8 h-16 rounded-b-full rounded-t-none bg-amber-500 -mt-8"></div> {/* Semicírculo */}
+                        </div>
+
+                        {/* 4. Foto Estilo Tarjeta */}
+                        <div className="absolute top-36 right-[-20px] w-48 h-56 bg-slate-100 rounded-3xl overflow-hidden shadow-lg border-4 border-white z-10 rotate-[-2deg]">
+                            <img src={photo} className="w-full h-full object-cover" alt={name} onError={(e) => e.target.src = getPhoto(null, name)}/>
+                            
+                            {/* Sticker "Edad" sobre la foto */}
+                            {age && (
+                                <div className="absolute bottom-2 left-2 bg-amber-500 text-white w-10 h-10 rounded-full flex items-center justify-center font-black text-sm shadow-md border-2 border-white rotate-12">
+                                    {age}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 5. Footer (QR & ID) */}
+                        <div className="mt-auto p-6 z-20 bg-gradient-to-t from-white via-white to-transparent">
+                            <div className="flex items-end gap-4">
+                                <div className="p-1 bg-brand-50 rounded-xl border border-brand-100">
+                                    <img src={qrUrl} className="w-16 h-16 mix-blend-multiply opacity-90" alt="QR" />
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-bold text-brand-600 uppercase mb-0.5">#ID Miembro</p>
+                                    <p className="text-lg font-mono font-black text-slate-700 leading-none">{id}</p>
+                                </div>
+                            </div>
+                            
+                            <div className="mt-4 pt-3 border-t border-slate-100">
+                                <p className="text-[9px] font-bold text-slate-400 uppercase">Email Contact</p>
+                                <p className="text-xs font-bold text-slate-600 truncate">{email || 'sin@email.com'}</p>
+                            </div>
+                        </div>
                         
-                        <div className="absolute bottom-1.5 text-[9px] text-slate-400 flex items-center gap-1 animate-pulse">
-                            <Icon name="RefreshCw" size={10} /> Tocar para girar
+                        {/* Indicador de giro */}
+                        <div className="absolute bottom-2 right-4 text-[9px] text-slate-300 flex items-center gap-1 z-30">
+                            <Icon name="RefreshCw" size={10} /> Voltear
                         </div>
                     </div>
 
-                    {/* --- DORSO --- */}
-                    <div className="absolute w-full h-full backface-hidden rotate-y-180 bg-slate-900 text-white rounded-3xl shadow-2xl overflow-hidden flex flex-col p-6 relative border border-slate-700">
-                         <div className="absolute -bottom-10 -right-10 w-48 h-48 bg-brand-600 rounded-full blur-[60px] opacity-20"></div>
-                         <div className="absolute top-4 w-12 h-3 bg-slate-800 rounded-full mx-auto left-0 right-0 shadow-inner"></div>
+                    {/* --- DORSO (Estilo Términos y Condiciones) --- */}
+                    <div ref={isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden rotate-y-180 bg-brand-700 text-white rounded-[2rem] shadow-2xl overflow-hidden flex flex-col p-8 relative">
+                         
+                        {/* Agujero Lanyard Reverso */}
+                        <div className="absolute top-4 left-1/2 -translate-x-1/2 w-12 h-3 bg-brand-800 rounded-full shadow-inner"></div>
+                        <div className="absolute top-[-10px] left-1/2 -translate-x-1/2 w-4 h-8 border-x-2 border-b-2 border-brand-600 rounded-b-full"></div>
 
-                         <div className="mt-6 text-center mb-6">
-                            <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-2 text-brand-400 border border-white/10">
-                                <Icon name="UserCheck" size={20}/>
-                            </div>
-                            <h3 className="font-bold text-base">Ficha Personal</h3>
-                         </div>
+                        <div className="mt-8 mb-6">
+                            <h3 className="font-bold text-2xl leading-tight">Datos <br/><span className="text-amber-400">Privados</span></h3>
+                            <div className="h-1 w-12 bg-white mt-2"></div>
+                        </div>
 
-                         <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-3 z-10">
-                            {/* Datos Básicos */}
-                            <div className="grid grid-cols-2 gap-3">
-                                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
-                                    <p className="text-[9px] text-slate-400 uppercase tracking-wide">Edad</p>
-                                    <p className="font-bold text-sm">{age !== '-' ? age + ' años' : '-'}</p>
-                                </div>
-                                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
-                                    <p className="text-[9px] text-slate-400 uppercase tracking-wide">Sangre</p>
-                                    <div className="flex items-center gap-1">
-                                        <Icon name="Droplet" size={10} className="text-red-400"/>
-                                        <p className="font-bold text-sm">{blood}</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Contacto */}
-                            <div className="bg-white/5 p-3 rounded-xl border border-white/5 space-y-2">
+                        <div className="flex-1 space-y-6">
+                            {/* Ítems numerados como "Reglas" */}
+                            <div className="flex gap-4 items-start">
+                                <span className="font-mono text-amber-400 font-bold text-lg opacity-80">01.</span>
                                 <div>
-                                    <p className="text-[9px] text-slate-400 uppercase">Email</p>
-                                    <p className="text-xs font-medium text-slate-200 break-all">{email || '-'}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[9px] text-slate-400 uppercase">Dirección</p>
-                                    <p className="text-xs font-medium text-slate-200">{address || '-'}</p>
+                                    <p className="text-[10px] uppercase font-bold opacity-70 mb-1">Contacto Personal</p>
+                                    <p className="font-medium text-sm leading-tight">{phone || 'No registrado'}</p>
+                                    <p className="text-xs opacity-60 mt-1">{address || 'Sin dirección'}</p>
                                 </div>
                             </div>
 
-                            {/* Emergencia (Destacado) */}
-                            {(emerContact || emerPhone) && (
-                                <div className="bg-red-500/10 p-3 rounded-xl border border-red-500/20">
-                                    <p className="text-[9px] text-red-300 font-bold uppercase flex items-center gap-1 mb-1">
-                                        <Icon name="AlertCircle" size={10}/> Emergencia
-                                    </p>
-                                    <p className="text-xs font-bold text-white">{emerContact || 'Contacto no esp.'}</p>
-                                    {emerPhone && <a href={`tel:${emerPhone}`} className="text-xs text-red-200 hover:text-white transition-colors block mt-1">{emerPhone}</a>}
+                            <div className="flex gap-4 items-start">
+                                <span className="font-mono text-amber-400 font-bold text-lg opacity-80">02.</span>
+                                <div>
+                                    <p className="text-[10px] uppercase font-bold opacity-70 mb-1">Grupo Sanguíneo</p>
+                                    <p className="font-medium text-sm">{blood}</p>
                                 </div>
-                            )}
+                            </div>
 
-                            {/* WhatsApp Action */}
-                            {phone && (
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); openWhatsApp(phone); }}
-                                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95 mt-2"
-                                >
-                                    <Icon name="MessageCircle" size={16} /> Contactar WhatsApp
-                                </button>
-                            )}
-                         </div>
+                            <div className="flex gap-4 items-start">
+                                <span className="font-mono text-red-400 font-bold text-lg opacity-80">03.</span>
+                                <div>
+                                    <p className="text-[10px] uppercase font-bold text-red-200 mb-1">Emergencia</p>
+                                    <p className="font-medium text-sm">{emerContact || 'Sin contacto'}</p>
+                                    <p className="font-mono text-xs text-red-200 mt-1">{emerPhone}</p>
+                                </div>
+                            </div>
+                        </div>
 
-                         <div className="mt-3 pt-3 border-t border-white/5 text-center">
-                             <p className="text-[9px] text-slate-500">Miembro desde: {joined.toString().slice(0,10)}</p>
-                         </div>
+                        <div className="mt-auto flex justify-between items-end border-t border-brand-500 pt-4">
+                            <div>
+                                <div className="w-8 h-8 bg-amber-500 rounded-full mb-2"></div>
+                                <p className="text-[9px] opacity-60">Iglesia Conquistadores</p>
+                            </div>
+                            <div className="w-8 h-8 bg-white rounded-full"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -209,84 +260,85 @@ window.Views.Directory = ({ members, directory, userProfile }) => {
                     </div>
                     <div>
                         <h2 className="text-xl font-extrabold text-slate-800 leading-tight">Directorio</h2>
-                        <p className="text-xs text-slate-500 font-bold">{dataList.length} Miembros registrados</p>
+                        <p className="text-xs text-slate-500 font-bold">{dataList.length} Miembros</p>
                     </div>
                 </div>
                 <div className="relative w-full md:w-64 group">
                     <Icon name="Search" size={16} className="absolute left-3 top-3 text-slate-400 group-focus-within:text-brand-500 transition-colors"/>
                     <input 
                         className="w-full bg-white border border-slate-200 rounded-xl py-2.5 pl-9 pr-4 text-xs font-bold outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all shadow-sm" 
-                        placeholder="Buscar por nombre, rol..." 
+                        placeholder="Buscar..." 
                         value={searchTerm} 
                         onChange={e=>setSearchTerm(e.target.value)} 
                     />
                 </div>
             </div>
 
-            {/* Grid de Miembros */}
+            {/* Grid */}
             {filteredMembers.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                     {filteredMembers.map(member => {
                         const name = getField(member, 'name', 'nombre') || 'Sin nombre';
                         const role = getField(member, 'role', 'rol', 'cargo') || 'Miembro';
                         const photo = getPhoto(getField(member, 'photo', 'foto', 'avatar', 'img'), name);
-                        const phone = getField(member, 'phone', 'telefono', 'celular');
-
+                        
                         return (
                             <div 
                                 key={member.id || Math.random()} 
                                 onClick={() => { setSelectedMember(member); setIsFlipped(false); }}
                                 className="group bg-white p-3 rounded-2xl shadow-sm border border-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all cursor-pointer flex items-center gap-3"
                             >
-                                <div className="relative">
-                                    <img src={photo} className="w-12 h-12 rounded-xl object-cover bg-slate-100" alt={name}/>
-                                    <div className={`absolute -bottom-1 -right-1 w-3 h-3 border-2 border-white rounded-full ${phone ? 'bg-emerald-400' : 'bg-slate-300'}`}></div>
-                                </div>
+                                <img src={photo} className="w-12 h-12 rounded-xl object-cover bg-slate-100" alt={name}/>
                                 <div className="flex-1 min-w-0">
-                                    <h4 className="font-bold text-slate-800 text-sm truncate group-hover:text-brand-600 transition-colors">{name}</h4>
-                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide truncate">{role}</p>
+                                    <h4 className="font-bold text-slate-800 text-sm truncate group-hover:text-brand-600">{name}</h4>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase truncate">{role}</p>
                                 </div>
-                                <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-brand-500 group-hover:text-white transition-colors">
-                                    <Icon name="CreditCard" size={14} />
-                                </div>
+                                <Icon name="CreditCard" size={16} className="text-slate-300 group-hover:text-brand-500"/>
                             </div>
                         );
                     })}
                 </div>
             ) : (
-                <div className="flex flex-col items-center justify-center py-16 text-slate-400 bg-slate-50/50 rounded-3xl border border-dashed border-slate-200">
-                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm">
-                        <Icon name="Search" size={24} className="opacity-20"/>
-                    </div>
-                    <p className="font-bold text-sm">No encontramos a nadie.</p>
-                    <p className="text-xs">Intenta con otro nombre.</p>
+                <div className="text-center py-12 text-slate-400">
+                    <Icon name="Search" size={32} className="mx-auto mb-2 opacity-20"/>
+                    <p className="text-sm">Sin resultados.</p>
                 </div>
             )}
 
-            {/* Modal - Credencial */}
+            {/* Modal Credencial */}
             {selectedMember && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm transition-opacity" onClick={() => setSelectedMember(null)}></div>
                     <div className="relative z-10 animate-enter flex flex-col items-center gap-6">
+                        
                         {renderCredential(selectedMember)}
-                        <button 
-                            onClick={() => setSelectedMember(null)}
-                            className="bg-white text-slate-800 px-6 py-2.5 rounded-full font-bold shadow-2xl hover:bg-slate-50 transition-transform active:scale-95 text-xs flex items-center gap-2"
-                        >
-                            <Icon name="X" size={14}/> Cerrar
-                        </button>
+                        
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={() => setSelectedMember(null)}
+                                className="bg-white text-slate-800 px-5 py-2.5 rounded-full font-bold shadow-lg hover:bg-slate-50 transition-transform active:scale-95 text-xs flex items-center gap-2"
+                            >
+                                <Icon name="X" size={14}/> Cerrar
+                            </button>
+                            <button 
+                                onClick={downloadPDF}
+                                disabled={isDownloading}
+                                className="bg-brand-600 text-white px-5 py-2.5 rounded-full font-bold shadow-lg hover:bg-brand-500 transition-transform active:scale-95 text-xs flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {isDownloading ? <Icon name="Loader" className="animate-spin" size={14}/> : <Icon name="Download" size={14}/>}
+                                {isDownloading ? 'Generando...' : 'Descargar PDF'}
+                            </button>
+                        </div>
+                        {isDownloading && <p className="text-white text-xs animate-pulse">Prepara la credencial en posición correcta antes de descargar...</p>}
                     </div>
                 </div>
             )}
 
-            {/* Estilos CSS Inline para 3D */}
             <style>{`
                 .perspective-1000 { perspective: 1000px; }
                 .transform-style-3d { transform-style: preserve-3d; }
                 .backface-hidden { backface-visibility: hidden; }
                 .rotate-y-180 { transform: rotateY(180deg); }
-                .custom-scrollbar::-webkit-scrollbar { width: 3px; }
-                .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
             `}</style>
         </div>
     );
