@@ -114,6 +114,7 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
         });
     }, [localMembers, searchTerm]);
 
+    // PDF GENERATOR
     const downloadPDF = async () => {
         if (!selectedMember || !cardRef.current) return;
         setIsDownloading(true);
@@ -147,12 +148,6 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
         if (!m) return null;
         const id = m.id || '---';
         const name = getField(m, 'name', 'nombre') || 'Sin Nombre';
-        
-        // Separar nombre para diseño exacto "AdvertHive"
-        const nameParts = name.split(' ');
-        const firstName = nameParts[0];
-        const lastName = nameParts.slice(1).join(' ') || '';
-
         const role = getField(m, 'role', 'rol') || 'Miembro';
         const photo = getPhoto(getField(m, 'photo', 'foto'), name);
         
@@ -166,125 +161,124 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
         const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${id}`;
 
         return (
-            <div className="perspective-1000 w-[320px] h-[520px] cursor-pointer group select-none relative" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
+            <div className="perspective-1000 w-[340px] h-[540px] cursor-pointer group select-none relative font-poppins" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
                 <div className={`relative w-full h-full duration-700 transform-style-3d transition-all ${isFlipped ? 'rotate-y-180' : ''}`}>
                     
-                    {/* --- FRENTE (REPLICA EXACTA ADVERTOHIVE) --- */}
-                    <div ref={!isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden bg-white rounded-[20px] shadow-2xl overflow-hidden border border-slate-100 flex flex-col z-20">
+                    {/* --- FRENTE (ESTILO PREMIUM ID) --- */}
+                    <div ref={!isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden flex flex-col z-20 bg-white">
                         
-                        {/* Header Textos Pequeños */}
-                        <div className="flex justify-between px-6 pt-6">
-                            <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">CONQUISTADORES</span>
-                            <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">{expirationYear}</span>
+                        {/* Agujero Superior */}
+                        <div className="absolute top-6 left-1/2 -translate-x-1/2 w-10 h-2 bg-slate-800 rounded-full z-50"></div>
+
+                        {/* 1. SECCIÓN SUPERIOR (CLARA) */}
+                        <div className="h-[210px] bg-slate-50 relative pt-12 text-center z-10">
+                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">CONQUISTADORES</p>
+                            <h1 className="text-xl font-medium text-blue-600 tracking-tight leading-none mb-1">Credencial Digital</h1>
+                            <h2 className="text-base font-black text-slate-900 tracking-wide uppercase">{expirationYear}</h2>
+
+                            {/* Foto Flotante Superpuesta */}
+                            <div className="absolute left-1/2 -translate-x-1/2 -bottom-[75px] w-[150px] h-[150px] bg-slate-50 rounded-full flex items-center justify-center shadow-[0_0_0_10px_#f8fafc] z-20">
+                                <div className="w-[140px] h-[140px] rounded-full overflow-hidden relative bg-white">
+                                    <img src={photo} className="w-full h-full object-cover" alt={name} onError={(e) => e.target.src = getPhoto(null, name)}/>
+                                </div>
+                            </div>
                         </div>
 
-                        <div className="flex flex-1 relative mt-4 px-6">
-                            {/* Columna Izquierda: Datos */}
-                            <div className="w-1/2 flex flex-col pt-2 z-10">
-                                {/* Nombre Gigante */}
-                                <h2 className="text-[28px] font-bold text-slate-800 leading-[0.9] tracking-tight">{firstName}</h2>
-                                <h2 className="text-[28px] font-bold text-slate-800 leading-[0.9] tracking-tight mb-3">{lastName}</h2>
+                        {/* 2. SECCIÓN INFERIOR (OSCURA/AZUL PROFUNDO) */}
+                        <div className="flex-1 bg-[#030816] relative pt-[90px] flex flex-col items-center overflow-hidden z-0">
+                            
+                            {/* Decoración Tech (Barras de unión) */}
+                            <div className="absolute top-[-3px] left-0 w-[60px] h-[6px] bg-blue-600 z-10"></div>
+                            <div className="absolute top-[-3px] right-0 w-[40px] h-[6px] bg-blue-600 z-10"></div>
 
-                                {/* Icono Rol (Circulo Naranja en referencia) */}
-                                <div className="flex items-center gap-2 mb-6">
-                                    <div className="w-6 h-6 rounded-full bg-brand-500 flex items-center justify-center text-white rotate-45">
-                                        <Icon name="ArrowUp" size={14} strokeWidth={3}/>
+                            {/* Marca de Agua (Watermark Outline) */}
+                            <div className="absolute bottom-10 -left-10 text-[120px] font-black italic text-transparent pointer-events-none opacity-20" style={{ WebkitTextStroke: '1px rgba(255,255,255,0.1)' }}>
+                                ID
+                            </div>
+                            <div className="absolute top-10 -right-10 text-[100px] font-black italic text-transparent pointer-events-none opacity-20 rotate-90" style={{ WebkitTextStroke: '1px rgba(37,99,235,0.2)' }}>
+                                2025
+                            </div>
+
+                            {/* Datos del Usuario */}
+                            <div className="relative z-10 text-center w-full px-6">
+                                <h2 className="text-[26px] font-bold text-[#1d6df2] leading-tight mb-1 truncate drop-shadow-lg">{name}</h2>
+                                <p className="text-[15px] font-light text-slate-300 uppercase tracking-wider mb-6">{role}</p>
+
+                                {/* Footer con QR y Vencimiento */}
+                                <div className="flex items-center justify-between bg-white/5 rounded-xl p-3 border border-white/10 backdrop-blur-sm">
+                                    <div className="text-left">
+                                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest mb-1">ID ÚNICO</p>
+                                        <p className="text-xs font-mono font-bold text-white tracking-widest">{id.slice(0,8).toUpperCase()}</p>
+                                        <p className="text-[8px] text-brand-400 font-bold uppercase mt-1">Vence: Dic {expirationYear}</p>
                                     </div>
-                                    <span className="text-[10px] font-bold text-brand-600 uppercase tracking-wide">{role}</span>
-                                </div>
-
-                                {/* Formas Geométricas Decorativas */}
-                                <div className="flex gap-1 mb-auto">
-                                    <div className="w-8 h-8 rounded-full bg-indigo-600"></div>
-                                    <div className="w-8 h-8 rounded-tr-full bg-brand-500"></div>
-                                </div>
-
-                                {/* QR Code (Caja Azul en referencia) */}
-                                <div className="mt-auto mb-6 bg-indigo-600 p-1.5 rounded-lg w-fit">
-                                    <img src={qrUrl} className="w-16 h-16 mix-blend-lighten bg-white rounded" alt="QR" />
-                                </div>
-
-                                {/* Textos Footer */}
-                                <div className="mb-6">
-                                    <p className="text-[10px] font-bold text-indigo-700">#ID :</p>
-                                    <p className="text-xs font-mono text-slate-600 mb-1">{id}</p>
-                                    
-                                    <p className="text-[10px] font-bold text-indigo-700">Vencimiento</p>
-                                    <p className="text-xs text-slate-600">Dic {expirationYear}</p>
+                                    <div className="bg-white p-1 rounded-lg">
+                                        <img src={qrUrl} className="w-12 h-12" alt="QR" />
+                                    </div>
                                 </div>
                             </div>
-
-                            {/* Columna Derecha: Foto */}
-                            <div className="w-1/2 h-[75%] absolute right-4 top-8 rounded-lg overflow-hidden bg-slate-100 shadow-sm">
-                                <img src={photo} className="w-full h-full object-cover" alt={name} onError={(e) => e.target.src = getPhoto(null, name)}/>
+                            
+                            {/* Decoración Geométrica Inferior */}
+                            <div className="mt-auto mb-4 flex items-end justify-center gap-1 opacity-80">
+                                <div className="w-1.5 h-6 bg-white transform -skew-x-[20deg]"></div>
+                                <div className="w-1.5 h-4 bg-[#1d6df2] transform -skew-x-[20deg]"></div>
+                                <div className="w-10 h-0.5 bg-[#1d6df2] mb-[2px]"></div>
                             </div>
+
+                            <div className="absolute bottom-2 text-[9px] text-slate-600 flex items-center gap-1"><Icon name="RotateCw" size={10} /></div>
                         </div>
-
-                        {/* Agujero Lanyard */}
-                        <div className="absolute top-3 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-200 rounded-full border border-slate-300"></div>
                     </div>
 
-                    {/* --- DORSO (TU DISEÑO OSCURO ORIGINAL) --- */}
-                    <div ref={isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden rotate-y-180 bg-slate-900 text-white rounded-[20px] shadow-2xl overflow-hidden flex flex-col p-6 relative z-20">
-                         {/* Fondo Sólido */}
+                    {/* --- DORSO (MANTENIDO IGUAL) --- */}
+                    <div ref={isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden rotate-y-180 bg-slate-900 text-white rounded-[24px] shadow-2xl overflow-hidden flex flex-col p-6 relative border border-slate-700 z-20">
                          <div className="absolute inset-0 bg-slate-900 -z-10"></div>
-                         
-                         {/* Decoración */}
                          <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-brand-600 rounded-full blur-[80px] opacity-20 pointer-events-none"></div>
-                         <div className="absolute top-3 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-700 rounded-full border border-slate-600"></div>
+                         <div className="absolute top-6 left-1/2 -translate-x-1/2 w-10 h-2 bg-slate-700 rounded-full"></div>
 
-                         <div className="mt-6 text-center mb-6 relative z-10">
-                            <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-2 text-brand-400 border border-white/10 backdrop-blur-sm">
-                                <Icon name="User" size={20}/>
+                         <div className="mt-8 text-center mb-6 relative z-10">
+                            <div className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-3 text-brand-400 border border-white/10 backdrop-blur-sm shadow-lg">
+                                <Icon name="User" size={24}/>
                             </div>
-                            <h3 className="font-bold text-base tracking-wide">Datos de Contacto</h3>
+                            <h3 className="font-bold text-lg tracking-wide">Contacto Privado</h3>
                          </div>
 
                          <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-4 z-10">
-                            
-                            {/* Botones Acción */}
+                            {/* Botones */}
                             <div className="grid grid-cols-2 gap-3 mb-2">
-                                <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(phone)}} className="bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition-all shadow-lg border border-emerald-500/30">
-                                    <Icon name="MessageCircle" size={14} /> WhatsApp
+                                <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(phone)}} className="bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg border border-emerald-500/30">
+                                    <Icon name="MessageCircle" size={16} /> WhatsApp
                                 </button>
-                                <button onClick={(e)=>{e.stopPropagation(); makeCall(phone)}} className="bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition-all shadow-lg border border-blue-500/30">
-                                    <Icon name="Phone" size={14} /> Llamar
+                                <button onClick={(e)=>{e.stopPropagation(); makeCall(phone)}} className="bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg border border-blue-500/30">
+                                    <Icon name="Phone" size={16} /> Llamar
                                 </button>
                             </div>
 
-                            {/* Datos Privados */}
-                            <div className="bg-white/5 p-3 rounded-xl border border-white/5 space-y-3">
+                            {/* Datos */}
+                            <div className="bg-white/5 p-4 rounded-xl border border-white/5 space-y-4">
                                 <div>
-                                    <p className="text-[9px] text-slate-400 uppercase flex items-center gap-1"><Icon name="Phone" size={10}/> Teléfono</p>
-                                    <p className="text-sm font-medium text-white mt-0.5 font-mono">{phone || 'No registrado'}</p>
+                                    <p className="text-[9px] text-slate-400 uppercase flex items-center gap-1 mb-1"><Icon name="Phone" size={10}/> Teléfono Móvil</p>
+                                    <p className="text-sm font-medium text-white font-mono tracking-wide">{phone || 'No registrado'}</p>
                                 </div>
                                 <div onClick={(e)=>{e.stopPropagation(); openMaps(address)}} className={`cursor-pointer hover:opacity-80 ${!address && 'pointer-events-none'}`}>
-                                    <p className="text-[9px] text-slate-400 uppercase flex items-center gap-1"><Icon name="MapPin" size={10}/> Dirección</p>
-                                    <p className={`text-xs font-medium mt-0.5 leading-tight ${address ? 'text-blue-300 underline decoration-blue-300/50' : 'text-slate-500'}`}>{address || 'Sin dirección'}</p>
+                                    <p className="text-[9px] text-slate-400 uppercase flex items-center gap-1 mb-1"><Icon name="MapPin" size={10}/> Dirección</p>
+                                    <p className={`text-xs font-medium leading-relaxed ${address ? 'text-blue-300 underline decoration-blue-300/50' : 'text-slate-500'}`}>{address || 'Sin dirección'}</p>
                                 </div>
                                 <div>
-                                    <p className="text-[9px] text-slate-400 uppercase flex items-center gap-1"><Icon name="Mail" size={10}/> Email</p>
-                                    <p className="text-xs font-medium text-slate-200 break-all mt-0.5">{email || '-'}</p>
+                                    <p className="text-[9px] text-slate-400 uppercase flex items-center gap-1 mb-1"><Icon name="Mail" size={10}/> Email</p>
+                                    <p className="text-xs font-medium text-slate-200 break-all">{email || '-'}</p>
                                 </div>
                             </div>
 
-                            {/* Emergencia */}
                             {(emerContact || emerPhone) && (
-                                <div className="bg-red-500/10 p-3 rounded-xl border border-red-500/20">
+                                <div className="bg-red-500/10 p-3 rounded-xl border border-red-500/20 mt-2">
                                     <p className="text-[9px] text-red-300 font-bold uppercase flex items-center gap-1 mb-1">
-                                        <Icon name="AlertTriangle" size={10}/> En caso de emergencia
+                                        <Icon name="AlertTriangle" size={10}/> Emergencia
                                     </p>
-                                    <p className="text-xs font-bold text-white">{emerContact}</p>
-                                    {emerPhone && <a href={`tel:${emerPhone}`} onClick={(e)=>e.stopPropagation()} className="text-xs text-red-200 hover:text-white transition-colors block mt-0.5 font-mono">{emerPhone}</a>}
+                                    <div className="flex justify-between items-center">
+                                        <p className="text-xs font-bold text-white">{emerContact}</p>
+                                        {emerPhone && <a href={`tel:${emerPhone}`} onClick={(e)=>e.stopPropagation()} className="text-xs text-red-200 hover:text-white bg-red-500/20 px-2 py-1 rounded font-mono transition-colors">{emerPhone}</a>}
+                                    </div>
                                 </div>
                             )}
-
-                            <button onClick={(e) => { e.stopPropagation(); Utils.notify('Función Visita: Próximamente'); }} className="w-full bg-brand-600 hover:bg-brand-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg mt-2">
-                                <Icon name="Calendar" size={14} /> Agendar Visita
-                            </button>
-                         </div>
-                         <div className="mt-3 pt-3 border-t border-white/5 text-center">
-                             <p className="text-[9px] text-slate-500">Documento interno. Válido hasta: Dic {expirationYear}</p>
                          </div>
                     </div>
                 </div>
@@ -294,7 +288,18 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
 
     // --- VISTA PRINCIPAL ---
     return (
-        <div className="space-y-6 fade-in pb-24">
+        <div className="space-y-6 fade-in pb-24 font-poppins">
+            <style>{`
+                @import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,800&display=swap');
+                .font-poppins { font-family: 'Poppins', sans-serif; }
+                .perspective-1000 { perspective: 1000px; }
+                .transform-style-3d { transform-style: preserve-3d; }
+                .backface-hidden { backface-visibility: hidden; }
+                .rotate-y-180 { transform: rotateY(180deg); }
+                .custom-scrollbar::-webkit-scrollbar { width: 3px; }
+                .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+            `}</style>
+
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="flex items-center gap-3">
@@ -401,15 +406,6 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                     </div>
                 </div>
             )}
-
-            <style>{`
-                .perspective-1000 { perspective: 1000px; }
-                .transform-style-3d { transform-style: preserve-3d; }
-                .backface-hidden { backface-visibility: hidden; }
-                .rotate-y-180 { transform: rotateY(180deg); }
-                .custom-scrollbar::-webkit-scrollbar { width: 3px; }
-                .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
-            `}</style>
         </div>
     );
 };
