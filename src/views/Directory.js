@@ -19,7 +19,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
     };
     const [form, setForm] = useState(initialForm);
 
-    const printRef = useRef(null); // Referencia para el PDF
+    const printRef = useRef(null); // Referencia oculta para el PDF
 
     // 3. HELPERS
     const getField = (item, ...keys) => {
@@ -30,7 +30,6 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
 
     const getPhoto = (photoUrl, name) => {
         if (photoUrl && photoUrl.length > 10) {
-            // Fix para Google Drive
             if (photoUrl.includes('drive.google.com')) {
                 const idMatch = photoUrl.match(/[-\w]{25,}/);
                 if (idMatch) return `https://drive.google.com/uc?export=view&id=${idMatch[0]}`;
@@ -129,61 +128,60 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
         return (m.name||'').toLowerCase().includes(term) || (m.role||'').toLowerCase().includes(term);
     });
 
-    // 5. PDF ROBUSTO
+    // 5. PDF ROBUSTO (Carga Dinámica Segura)
     const downloadPDF = async () => {
         if (!selectedMember || !printRef.current) return;
         setIsDownloading(true);
 
-        setTimeout(async () => {
-            try {
-                // Verificar si html2pdf existe, sino cargarlo
-                let worker = window.html2pdf;
-                if (!worker || typeof worker !== 'function') {
-                    console.log("Cargando librería PDF...");
-                    await new Promise((resolve, reject) => {
-                        const script = document.createElement('script');
-                        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-                        script.onload = resolve;
-                        script.onerror = reject;
-                        document.head.appendChild(script);
-                    });
-                    worker = window.html2pdf;
-                }
-
-                const element = printRef.current;
-                element.style.display = 'block'; // Hacer visible para la captura
-                
-                const opt = {
-                    margin: 0,
-                    filename: `Credencial_${selectedMember.name.replace(/\s+/g,'_')}.pdf`,
-                    image: { type: 'jpeg', quality: 0.98 },
-                    html2canvas: { 
-                        scale: 4, 
-                        useCORS: true, 
-                        logging: false,
-                        backgroundColor: '#0f172a' // Forzar fondo oscuro
-                    },
-                    jsPDF: { unit: 'mm', format: [54, 86], orientation: 'portrait' }
-                };
-                
-                if (worker) {
-                    await worker().set(opt).from(element).save();
-                    Utils.notify("PDF Descargado");
-                } else {
-                    alert("Error: No se pudo cargar el generador de PDF.");
-                }
-                
-                element.style.display = 'none'; // Ocultar
-            } catch (error) { 
-                console.error("PDF Error:", error); 
-                Utils.notify("Error al generar PDF. Revisa la consola.", 'error'); 
-            } finally {
-                setIsDownloading(false);
+        try {
+            // Asegurar carga de librería
+            if (!window.html2pdf) {
+                console.log("Cargando librería PDF...");
+                await new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+                    script.onload = resolve;
+                    script.onerror = () => reject("Error al cargar script PDF");
+                    document.head.appendChild(script);
+                });
             }
-        }, 500);
+
+            // Esperar un momento a que el script se inicialice
+            await new Promise(r => setTimeout(r, 500));
+
+            const element = printRef.current;
+            element.style.display = 'block'; // Mostrar temporalmente
+            
+            const opt = {
+                margin: 0,
+                filename: `Credencial_${selectedMember.name.replace(/\s+/g,'_')}.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { 
+                    scale: 4, 
+                    useCORS: true, 
+                    logging: false,
+                    backgroundColor: '#ffffff' // Fondo base blanco
+                },
+                jsPDF: { unit: 'mm', format: [54, 86], orientation: 'portrait' }
+            };
+            
+            if (window.html2pdf) {
+                await window.html2pdf().set(opt).from(element).save();
+                Utils.notify("PDF Descargado");
+            } else {
+                alert("Error: La librería PDF no está disponible.");
+            }
+            
+            element.style.display = 'none'; // Ocultar
+        } catch (error) { 
+            console.error("PDF Error:", error); 
+            Utils.notify("Error al generar PDF. Intenta de nuevo.", 'error'); 
+        } finally {
+            setIsDownloading(false);
+        }
     };
 
-    // --- TARJETA VISUAL ---
+    // --- TARJETA VISUAL (DISEÑO SPLIT) ---
     const CardContent = ({ m, isFront }) => {
         if (!m) return null;
         
@@ -197,60 +195,61 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
         const year = new Date().getFullYear();
         const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${m.id}`;
         
-        // Colores de la marca (usando los de Tailwind)
-        const BRAND_BLUE = "bg-blue-600"; // Para el fondo inferior
-        const BRAND_DARK = "bg-slate-900"; // Para el dorso
+        // Color Azul Oscuro Profundo (El mismo de atrás)
+        const DARK_BG = "bg-[#0f172a]"; // Slate 900 personalizado
 
         if (isFront) {
             return (
                 <div className="w-full h-full bg-white relative overflow-hidden flex flex-col items-center select-none font-sans">
                     
-                    {/* PARTE SUPERIOR (CLARA) */}
-                    <div className="w-full h-[55%] bg-white relative pt-6 text-center z-10">
+                    {/* --- PARTE SUPERIOR (BLANCA) --- */}
+                    {/* Ocupa el 60% para dejar espacio a la foto y textos superiores */}
+                    <div className="w-full h-[55%] bg-white relative pt-8 text-center z-10 flex flex-col items-center">
                         {/* Header */}
-                        <div className="flex flex-col items-center">
-                            <p className="text-[8px] font-black text-slate-400 tracking-[0.25em] uppercase">CONQUISTADORES</p>
+                        <div className="mb-1">
+                            <div className="w-8 h-1 bg-slate-200 rounded-full mx-auto mb-2"></div>
+                            <p className="text-[8px] font-black text-slate-400 tracking-[0.25em] uppercase mb-1">CONQUISTADORES</p>
                             <h2 className="text-sm font-bold text-blue-600 uppercase tracking-wider">Credencial Digital</h2>
                             <p className="text-[9px] font-bold text-slate-800">{year}</p>
                         </div>
                     </div>
 
-                    {/* FOTO CENTRAL SUPERPUESTA */}
-                    <div className="absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-30">
-                        <div className="w-[130px] h-[130px] rounded-full p-1.5 bg-white shadow-xl">
-                            <img src={photo} className="w-full h-full object-cover rounded-full bg-slate-100 border-4 border-blue-50" alt={m.name} crossOrigin="anonymous"/>
+                    {/* FOTO CENTRAL (FLOTANTE) */}
+                    {/* Posicionada absolutamente para estar ENTRE las dos secciones */}
+                    <div className="absolute top-[42%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-30">
+                        <div className="w-[140px] h-[140px] rounded-full p-1.5 bg-white shadow-xl shadow-slate-900/20">
+                            <img src={photo} className="w-full h-full object-cover rounded-full bg-slate-100 border-2 border-slate-50" alt={m.name} crossOrigin="anonymous"/>
                         </div>
                     </div>
 
-                    {/* PARTE INFERIOR (OSCURA) CON CURVA */}
-                    <div className={`w-full h-[45%] ${BRAND_BLUE} relative flex flex-col items-center justify-end pb-6 px-5 z-0`}>
-                        {/* Curva de Unión */}
-                        <div className={`absolute top-[-1px] left-0 w-full h-20 ${BRAND_BLUE} rounded-t-[50%] scale-x-150 -translate-y-1/2 z-0`}></div>
+                    {/* --- PARTE INFERIOR (AZUL OSCURO) --- */}
+                    {/* Ocupa el resto, fondo sólido oscuro */}
+                    <div className={`w-full h-[45%] ${DARK_BG} relative flex flex-col items-center justify-end pb-6 px-5 z-0`}>
+                        
+                        {/* Curva de Unión (Efecto Visual) */}
+                        {/* Esto crea la onda suave entre el blanco y el azul */}
+                        <div className={`absolute top-[-1px] left-0 w-full h-16 ${DARK_BG} rounded-t-[50%] scale-x-150 -translate-y-1/2 z-0`}></div>
 
-                        {/* DATOS PRINCIPALES */}
-                        <div className="relative z-10 text-center mt-14 mb-auto w-full">
-                            <h1 className="text-xl font-black text-white leading-none mb-1 drop-shadow-md">{firstName}</h1>
-                            <h2 className="text-lg font-bold text-blue-200 leading-tight mb-2 drop-shadow-md">{lastName}</h2>
+                        {/* Datos Texto (Sobre fondo oscuro) */}
+                        <div className="relative z-10 text-center mt-12 mb-auto w-full">
+                            <h1 className="text-2xl font-black text-white leading-none mb-1 drop-shadow-md">{firstName}</h1>
+                            <h2 className="text-xl font-bold text-blue-400 leading-tight mb-3 drop-shadow-md">{lastName}</h2>
                             
-                            {/* Badges de ROL y ÁREA */}
-                            <div className="flex flex-col gap-1.5 w-full items-center justify-center">
-                                <span className="bg-white/20 text-white px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border border-white/30">
-                                    {role}
-                                </span>
-                                <span className="text-[8px] font-bold text-blue-200 uppercase tracking-widest bg-black/20 px-3 py-0.5 rounded border border-white/10">
-                                    {ministry}
-                                </span>
-                            </div>
+                            {/* Badge ROL */}
+                            <span className="inline-block bg-slate-800 border border-slate-600 text-white px-5 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-lg">
+                                {role}
+                            </span>
                         </div>
 
-                        {/* FOOTER */}
-                        <div className="mt-auto w-full px-2 relative z-10 flex items-end justify-between">
-                            <div className="text-left">
-                                <p className="text-[7px] font-bold text-blue-200 uppercase tracking-widest mb-0.5">ID MIEMBRO</p>
-                                <p className="text-sm font-black text-white tracking-widest leading-none font-mono">{id}</p>
+                        {/* Footer ID y QR */}
+                        <div className="relative z-10 w-full bg-white/5 rounded-xl p-2.5 border border-white/10 flex items-center justify-between backdrop-blur-sm mt-2">
+                            <div className="text-left pl-1">
+                                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">ID ÚNICO</p>
+                                <p className="text-[10px] font-mono font-bold text-white tracking-widest uppercase">{id}</p>
+                                <p className="text-[7px] font-bold text-blue-400 uppercase mt-0.5 tracking-wider">CDS MI CASA</p>
                             </div>
-                            <div className="bg-white p-1.5 rounded-lg shadow-lg">
-                                <img src={qrUrl} className="w-12 h-12" alt="QR" crossOrigin="anonymous"/>
+                            <div className="bg-white p-1 rounded-md">
+                                <img src={qrUrl} className="w-10 h-10" alt="QR" crossOrigin="anonymous"/>
                             </div>
                         </div>
                     </div>
@@ -258,65 +257,56 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
             );
         }
 
-        // DORSO
+        // DORSO (AZUL OSCURO SÓLIDO)
         return (
-            <div className={`w-full h-full ${BRAND_DARK} relative overflow-hidden flex flex-col p-6 font-sans text-white`}>
-                {/* Fondo Sólido */}
-                <div className={`absolute inset-0 ${BRAND_DARK} z-0`}></div>
+            <div className={`w-full h-full ${DARK_BG} relative overflow-hidden flex flex-col p-6 font-sans text-white`}>
+                <div className={`absolute inset-0 ${DARK_BG} z-0`}></div>
                 
                 <div className="relative z-10 text-center mb-6 mt-4">
-                    <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-2 text-blue-400 border border-white/20 shadow-lg">
+                    <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-2 text-blue-400 border border-white/10 shadow-lg">
                         <Icon name="User" size={22}/>
                     </div>
-                    <h3 className="font-bold text-white text-base tracking-wide uppercase">Información de Contacto</h3>
+                    <h3 className="font-bold text-white text-base tracking-wide uppercase">Contacto</h3>
                 </div>
 
                 <div className="relative z-10 flex-1 space-y-4">
-                    {/* Lista de Datos */}
-                    <div className="bg-slate-800/50 p-4 rounded-xl border border-white/10 space-y-3 backdrop-blur-sm divide-y divide-white/5">
-                        <div className="flex items-center gap-3 pb-2">
-                            <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400">
-                                <Icon name="Phone" size={14}/>
-                            </div>
-                            <div>
-                                <p className="text-[8px] text-slate-400 uppercase font-bold mb-0.5">Teléfono</p>
-                                <p className="text-xs text-white font-mono">{m.phone || 'No registrado'}</p>
+                    <div className="bg-slate-800/50 p-4 rounded-xl border border-white/10 space-y-3 backdrop-blur-sm">
+                        <div className="flex items-center gap-3 border-b border-white/5 pb-2">
+                            <div className="text-blue-400"><Icon name="Phone" size={14}/></div>
+                            <div className="flex-1">
+                                <p className="text-[8px] text-slate-400 uppercase font-bold">Teléfono</p>
+                                <p className="text-sm font-mono">{m.phone || 'No registrado'}</p>
                             </div>
                         </div>
-                        <div className="flex items-center gap-3 py-2">
-                             <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400">
-                                <Icon name="Mail" size={14}/>
-                            </div>
-                            <div>
-                                <p className="text-[8px] text-slate-400 uppercase font-bold mb-0.5">Email</p>
-                                <p className="text-xs text-white truncate">{m.email || 'No registrado'}</p>
+                        <div className="flex items-center gap-3 border-b border-white/5 pb-2">
+                            <div className="text-blue-400"><Icon name="Mail" size={14}/></div>
+                            <div className="flex-1">
+                                <p className="text-[8px] text-slate-400 uppercase font-bold">Email</p>
+                                <p className="text-xs truncate">{m.email || 'No registrado'}</p>
                             </div>
                         </div>
-                        <div className="flex items-center gap-3 py-2 cursor-pointer group" onClick={(e)=>{e.stopPropagation(); openMaps(m.address)}}>
-                             <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400 group-hover:bg-blue-500/20 transition-colors">
-                                <Icon name="MapPin" size={14}/>
-                            </div>
-                            <div>
-                                <p className="text-[8px] text-slate-400 uppercase font-bold mb-0.5">Dirección</p>
-                                <p className={`text-xs text-white leading-tight ${m.address ? 'group-hover:text-blue-300 transition-colors' : ''}`}>{m.address || 'No registrada'}</p>
+                        <div className="flex items-center gap-3">
+                            <div className="text-blue-400"><Icon name="MapPin" size={14}/></div>
+                            <div className="flex-1 cursor-pointer" onClick={(e)=>{e.stopPropagation(); openMaps(m.address)}}>
+                                <p className="text-[8px] text-slate-400 uppercase font-bold">Dirección</p>
+                                <p className="text-xs leading-tight underline decoration-slate-600">{m.address || 'No registrada'}</p>
                             </div>
                         </div>
-                        {(m.emergencyContact || m.emergencyPhone) && (
-                            <div className="flex items-center gap-3 pt-2">
-                                <div className="w-8 h-8 rounded-full bg-red-600/20 flex items-center justify-center text-red-400">
-                                    <Icon name="AlertTriangle" size={14}/>
-                                </div>
-                                <div>
-                                    <p className="text-[8px] text-red-400 font-bold uppercase mb-0.5">Emergencia</p>
-                                    <p className="text-xs font-bold text-white">{m.emergencyContact}</p>
-                                    <p className="text-xs text-red-300 font-mono tracking-wide">{m.emergencyPhone}</p>
-                                </div>
-                            </div>
-                        )}
                     </div>
-                    
+
+                    {(m.emergencyContact || m.emergencyPhone) && (
+                        <div className="bg-red-900/20 p-3 rounded-xl border border-red-500/20 flex items-center gap-3">
+                            <div className="text-red-400"><Icon name="AlertTriangle" size={16}/></div>
+                            <div>
+                                <p className="text-[8px] text-red-300 font-bold uppercase mb-0.5">Emergencia</p>
+                                <p className="text-xs font-bold text-white">{m.emergencyContact}</p>
+                                <p className="text-xs text-red-200 font-mono">{m.emergencyPhone}</p>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Botones de Acción */}
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-3 mt-auto">
                         <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(m.phone)}} className="col-span-2 w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg border border-emerald-400/30">
                             <Icon name="MessageCircle" size={16} /> Enviar WhatsApp
                         </button>
@@ -324,13 +314,13 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
                             <Icon name="Phone" size={14} /> Llamar
                         </button>
                         <button onClick={(e)=>{e.stopPropagation(); openWhatsApp('5491136278857', `Hola, soy ${firstName}, quiero agendar una visita.`)}} className="bg-slate-700/50 hover:bg-slate-600 text-slate-300 border border-slate-500/30 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all">
-                            <Icon name="Calendar" size={14} /> Visita Pastoral
+                            <Icon name="Calendar" size={14} /> Visita
                         </button>
                     </div>
                 </div>
                 
                 <div className="mt-auto text-center pt-3 border-t border-white/10 relative z-10">
-                    <p className="text-[8px] text-slate-400">CDS MI CASA • {year}</p>
+                    <p className="text-[8px] text-slate-500">CDS MI CASA • {year}</p>
                 </div>
             </div>
         );
@@ -402,7 +392,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
                         <Input type="date" label="Nacimiento" value={form.birthDate} onChange={e=>setForm({...form, birthDate:e.target.value})} />
                         <Input type="date" label="Ingreso" value={form.joinedDate} onChange={e=>setForm({...form, joinedDate:e.target.value})} />
                     </div>
-                    <Button className="w-full mt-4" onClick={handleSave}>Guardar</Button>
+                    <Button className="w-full mt-4" onClick={handleSave}>Guardar Datos</Button>
                 </div>
             </Modal>
 
@@ -421,9 +411,9 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
                         <div className="perspective-1000 w-[320px] h-[520px] cursor-pointer group select-none relative" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
                             <div className={`relative w-full h-full duration-700 transform-style-3d transition-all ${isFlipped ? 'rotate-y-180' : ''}`}>
                                 {/* Frente */}
-                                <div className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden bg-[#0f172a] border border-slate-800">
+                                <div className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden bg-white border border-slate-200">
                                     <CardContent m={selectedMember} isFront={true} />
-                                    <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-slate-400 flex items-center gap-1 z-50 bg-slate-900/50 px-2 py-0.5 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
+                                    <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-slate-400 flex items-center gap-1 z-50 bg-white/20 px-2 py-0.5 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
                                 </div>
                                 {/* Dorso */}
                                 <div className="absolute w-full h-full backface-hidden rotate-y-180 rounded-[24px] shadow-2xl overflow-hidden bg-[#0f172a] border border-slate-800">
@@ -451,8 +441,6 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
                 .rotate-y-180 { transform: rotateY(180deg); }
                 .custom-scrollbar::-webkit-scrollbar { width: 3px; }
                 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-                .animate-spin-slow { animation: spin 8s linear infinite; }
-                @keyframes spin { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(360deg); } }
             `}</style>
         </div>
     );
