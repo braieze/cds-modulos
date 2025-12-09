@@ -36,7 +36,7 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
 
     const getPhoto = (photoUrl, name) => {
         if (photoUrl && photoUrl.length > 5) return photoUrl;
-        return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=f1f5f9&color=64748b&size=256`;
+        return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=e2e8f0&color=475569&size=512`;
     };
 
     const openWhatsApp = (phone) => {
@@ -148,7 +148,7 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
         const id = m.id || '---';
         const name = getField(m, 'name', 'nombre') || 'Sin Nombre';
         
-        // Separar nombre para diseño "Gigante"
+        // Separar nombre para diseño exacto "AdvertHive"
         const nameParts = name.split(' ');
         const firstName = nameParts[0];
         const lastName = nameParts.slice(1).join(' ') || '';
@@ -169,67 +169,69 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
             <div className="perspective-1000 w-[320px] h-[520px] cursor-pointer group select-none relative" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
                 <div className={`relative w-full h-full duration-700 transform-style-3d transition-all ${isFlipped ? 'rotate-y-180' : ''}`}>
                     
-                    {/* --- FRENTE (ESTILO REVISTA / BOLD) --- */}
-                    <div ref={!isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 flex flex-col z-20">
+                    {/* --- FRENTE (REPLICA EXACTA ADVERTOHIVE) --- */}
+                    <div ref={!isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden bg-white rounded-[20px] shadow-2xl overflow-hidden border border-slate-100 flex flex-col z-20">
                         
-                        {/* Decoración Superior */}
-                        <div className="absolute top-0 right-0 w-32 h-32 bg-brand-500 rounded-bl-[80px] z-0 opacity-10"></div>
-                        <div className="absolute top-[-20px] left-[-20px] w-24 h-24 bg-indigo-500 rounded-full blur-2xl opacity-10"></div>
-
-                        {/* 1. Header */}
-                        <div className="relative pt-8 px-6 flex justify-between items-start z-10">
-                            <div className="flex flex-col">
-                                <span className="text-[10px] font-black tracking-[0.2em] text-slate-400 uppercase">CONQUISTADORES</span>
-                                <div className="h-1 w-6 bg-brand-600 mt-1 rounded-full"></div>
-                            </div>
-                            <span className="text-[10px] font-bold text-slate-300">2025</span>
+                        {/* Header Textos Pequeños */}
+                        <div className="flex justify-between px-6 pt-6">
+                            <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">CONQUISTADORES</span>
+                            <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">{expirationYear}</span>
                         </div>
 
-                        {/* 2. Cuerpo Principal */}
-                        <div className="px-6 mt-6 z-10 relative">
-                            {/* Nombre Gigante */}
-                            <div className="flex flex-col leading-[0.85] mb-4">
-                                <h2 className="text-4xl font-black text-slate-800 tracking-tight">{firstName}</h2>
-                                <h2 className="text-4xl font-black text-brand-600 tracking-tight">{lastName}</h2>
-                            </div>
+                        <div className="flex flex-1 relative mt-4 px-6">
+                            {/* Columna Izquierda: Datos */}
+                            <div className="w-1/2 flex flex-col pt-2 z-10">
+                                {/* Nombre Gigante */}
+                                <h2 className="text-[28px] font-bold text-slate-800 leading-[0.9] tracking-tight">{firstName}</h2>
+                                <h2 className="text-[28px] font-bold text-slate-800 leading-[0.9] tracking-tight mb-3">{lastName}</h2>
 
-                            {/* Badge Rol */}
-                            <div className="inline-flex items-center gap-2 bg-slate-900 text-white pl-1 pr-3 py-1 rounded-full mb-6 shadow-lg">
-                                <div className="w-5 h-5 bg-brand-500 rounded-full flex items-center justify-center">
-                                    <Icon name="Check" size={10} strokeWidth={4} />
+                                {/* Icono Rol (Circulo Naranja en referencia) */}
+                                <div className="flex items-center gap-2 mb-6">
+                                    <div className="w-6 h-6 rounded-full bg-brand-500 flex items-center justify-center text-white rotate-45">
+                                        <Icon name="ArrowUp" size={14} strokeWidth={3}/>
+                                    </div>
+                                    <span className="text-[10px] font-bold text-brand-600 uppercase tracking-wide">{role}</span>
                                 </div>
-                                <span className="text-[10px] font-bold uppercase tracking-wider">{role}</span>
+
+                                {/* Formas Geométricas Decorativas */}
+                                <div className="flex gap-1 mb-auto">
+                                    <div className="w-8 h-8 rounded-full bg-indigo-600"></div>
+                                    <div className="w-8 h-8 rounded-tr-full bg-brand-500"></div>
+                                </div>
+
+                                {/* QR Code (Caja Azul en referencia) */}
+                                <div className="mt-auto mb-6 bg-indigo-600 p-1.5 rounded-lg w-fit">
+                                    <img src={qrUrl} className="w-16 h-16 mix-blend-lighten bg-white rounded" alt="QR" />
+                                </div>
+
+                                {/* Textos Footer */}
+                                <div className="mb-6">
+                                    <p className="text-[10px] font-bold text-indigo-700">#ID :</p>
+                                    <p className="text-xs font-mono text-slate-600 mb-1">{id}</p>
+                                    
+                                    <p className="text-[10px] font-bold text-indigo-700">Vencimiento</p>
+                                    <p className="text-xs text-slate-600">Dic {expirationYear}</p>
+                                </div>
                             </div>
 
-                            {/* Foto Grande y Desplazada */}
-                            <div className="relative w-full h-56 rounded-3xl overflow-hidden shadow-xl border-4 border-white bg-slate-100 mt-2">
+                            {/* Columna Derecha: Foto */}
+                            <div className="w-1/2 h-[75%] absolute right-4 top-8 rounded-lg overflow-hidden bg-slate-100 shadow-sm">
                                 <img src={photo} className="w-full h-full object-cover" alt={name} onError={(e) => e.target.src = getPhoto(null, name)}/>
                             </div>
                         </div>
 
-                        {/* 3. Footer (QR y Vencimiento) */}
-                        <div className="mt-auto px-6 pb-6 pt-4 flex items-center justify-between z-10">
-                            <div>
-                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">VENCIMIENTO</p>
-                                <p className="text-xl font-black text-slate-800 leading-none">DIC {expirationYear}</p>
-                            </div>
-                            <div className="bg-white p-1 rounded-lg border border-slate-100 shadow-md">
-                                <img src={qrUrl} className="w-14 h-14 mix-blend-multiply opacity-90" alt="QR" />
-                            </div>
-                        </div>
-
-                        {/* Agujero Lanyard Simulado */}
-                        <div className="absolute top-4 left-1/2 -translate-x-1/2 w-12 h-3 bg-slate-100 rounded-full shadow-inner border border-slate-200"></div>
-                        
-                        <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-slate-300 flex items-center gap-1"><Icon name="RotateCw" size={10} /> Girar</div>
+                        {/* Agujero Lanyard */}
+                        <div className="absolute top-3 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-200 rounded-full border border-slate-300"></div>
                     </div>
 
-                    {/* --- DORSO (OSCURO) --- */}
-                    <div ref={isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden rotate-y-180 bg-slate-900 text-white rounded-3xl shadow-2xl overflow-hidden flex flex-col p-6 relative border border-slate-700 z-20">
-                         {/* Fondo Solido Asegurado */}
+                    {/* --- DORSO (TU DISEÑO OSCURO ORIGINAL) --- */}
+                    <div ref={isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden rotate-y-180 bg-slate-900 text-white rounded-[20px] shadow-2xl overflow-hidden flex flex-col p-6 relative z-20">
+                         {/* Fondo Sólido */}
                          <div className="absolute inset-0 bg-slate-900 -z-10"></div>
+                         
+                         {/* Decoración */}
                          <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-brand-600 rounded-full blur-[80px] opacity-20 pointer-events-none"></div>
-                         <div className="absolute top-4 w-12 h-3 bg-slate-700 rounded-full mx-auto left-0 right-0 shadow-inner"></div>
+                         <div className="absolute top-3 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-700 rounded-full border border-slate-600"></div>
 
                          <div className="mt-6 text-center mb-6 relative z-10">
                             <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-2 text-brand-400 border border-white/10 backdrop-blur-sm">
@@ -239,7 +241,8 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                          </div>
 
                          <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-4 z-10">
-                            {/* Botones */}
+                            
+                            {/* Botones Acción */}
                             <div className="grid grid-cols-2 gap-3 mb-2">
                                 <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(phone)}} className="bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition-all shadow-lg border border-emerald-500/30">
                                     <Icon name="MessageCircle" size={14} /> WhatsApp
@@ -279,6 +282,9 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                             <button onClick={(e) => { e.stopPropagation(); Utils.notify('Función Visita: Próximamente'); }} className="w-full bg-brand-600 hover:bg-brand-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg mt-2">
                                 <Icon name="Calendar" size={14} /> Agendar Visita
                             </button>
+                         </div>
+                         <div className="mt-3 pt-3 border-t border-white/5 text-center">
+                             <p className="text-[9px] text-slate-500">Documento interno. Válido hasta: Dic {expirationYear}</p>
                          </div>
                     </div>
                 </div>
