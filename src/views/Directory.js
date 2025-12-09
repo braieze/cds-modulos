@@ -197,61 +197,61 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
         const year = new Date().getFullYear();
         const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${m.id}`;
         
-        const DARK_BG = "bg-[#0f172a]"; 
+        // Colores de la marca (usando los de Tailwind)
+        const BRAND_BLUE = "bg-blue-600"; // Para el fondo inferior
+        const BRAND_DARK = "bg-slate-900"; // Para el dorso
 
         if (isFront) {
             return (
-                <div className={`w-full h-full ${DARK_BG} relative overflow-hidden flex flex-col items-center select-none font-sans text-white`}>
+                <div className="w-full h-full bg-white relative overflow-hidden flex flex-col items-center select-none font-sans">
                     
-                    {/* Fondo con Textura Sutil */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-[#0f172a] z-0"></div>
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-[80px] pointer-events-none"></div>
-                    <div className="absolute bottom-0 left-0 w-64 h-64 bg-brand-500/10 rounded-full blur-[80px] pointer-events-none"></div>
-
-                    {/* Header */}
-                    <div className="relative z-10 w-full pt-8 text-center">
-                        <p className="text-[8px] font-black text-slate-400 tracking-[0.3em] uppercase mb-1">CONQUISTADORES</p>
-                        <h2 className="text-[10px] font-bold text-white uppercase tracking-widest border-b border-brand-500/50 pb-2 inline-block px-4">
-                            CDS MI CASA
-                        </h2>
-                    </div>
-
-                    {/* FOTO CENTRAL CON ESTILO */}
-                    <div className="relative z-10 mt-6 mb-2">
-                        {/* Anillo de energía */}
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[148px] h-[148px] rounded-full border border-blue-400/30"></div>
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[160px] h-[160px] rounded-full border border-dashed border-slate-600/30 animate-spin-slow"></div>
-                        
-                        <div className="w-[140px] h-[140px] rounded-full p-1 bg-gradient-to-tr from-brand-500 to-cyan-400 shadow-2xl relative overflow-hidden">
-                            <img src={photo} className="w-full h-full object-cover rounded-full bg-slate-800" alt={m.name} crossOrigin="anonymous"/>
+                    {/* PARTE SUPERIOR (CLARA) */}
+                    <div className="w-full h-[55%] bg-white relative pt-6 text-center z-10">
+                        {/* Header */}
+                        <div className="flex flex-col items-center">
+                            <p className="text-[8px] font-black text-slate-400 tracking-[0.25em] uppercase">CONQUISTADORES</p>
+                            <h2 className="text-sm font-bold text-blue-600 uppercase tracking-wider">Credencial Digital</h2>
+                            <p className="text-[9px] font-bold text-slate-800">{year}</p>
                         </div>
                     </div>
 
-                    {/* DATOS PRINCIPALES */}
-                    <div className="relative z-10 text-center px-4 flex flex-col items-center w-full">
-                        <h1 className="text-2xl font-black text-white leading-none mb-1 drop-shadow-lg tracking-tight">{firstName}</h1>
-                        <h2 className="text-xl font-bold text-slate-300 leading-none mb-3 drop-shadow-md">{lastName}</h2>
-                        
-                        {/* Badges de ROL y ÁREA */}
-                        <div className="flex flex-col gap-1.5 w-full items-center">
-                            <span className="bg-brand-600 text-white px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-lg shadow-brand-500/20 border border-brand-400/30 w-fit">
-                                {role}
-                            </span>
-                            <span className="text-[8px] font-bold text-cyan-400 uppercase tracking-widest bg-cyan-950/30 px-3 py-0.5 rounded border border-cyan-500/20 w-fit">
-                                {ministry}
-                            </span>
+                    {/* FOTO CENTRAL SUPERPUESTA */}
+                    <div className="absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-30">
+                        <div className="w-[130px] h-[130px] rounded-full p-1.5 bg-white shadow-xl">
+                            <img src={photo} className="w-full h-full object-cover rounded-full bg-slate-100 border-4 border-blue-50" alt={m.name} crossOrigin="anonymous"/>
                         </div>
                     </div>
 
-                    {/* FOOTER */}
-                    <div className="mt-auto w-full px-6 pb-6 pt-2 relative z-10 flex items-end justify-between">
-                        <div className="text-left">
-                            <p className="text-[7px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">VENCIMIENTO</p>
-                            <p className="text-sm font-black text-white tracking-widest leading-none">DIC {year}</p>
-                            <p className="text-[7px] font-mono text-slate-400 mt-1 tracking-wider">{id}</p>
+                    {/* PARTE INFERIOR (OSCURA) CON CURVA */}
+                    <div className={`w-full h-[45%] ${BRAND_BLUE} relative flex flex-col items-center justify-end pb-6 px-5 z-0`}>
+                        {/* Curva de Unión */}
+                        <div className={`absolute top-[-1px] left-0 w-full h-20 ${BRAND_BLUE} rounded-t-[50%] scale-x-150 -translate-y-1/2 z-0`}></div>
+
+                        {/* DATOS PRINCIPALES */}
+                        <div className="relative z-10 text-center mt-14 mb-auto w-full">
+                            <h1 className="text-xl font-black text-white leading-none mb-1 drop-shadow-md">{firstName}</h1>
+                            <h2 className="text-lg font-bold text-blue-200 leading-tight mb-2 drop-shadow-md">{lastName}</h2>
+                            
+                            {/* Badges de ROL y ÁREA */}
+                            <div className="flex flex-col gap-1.5 w-full items-center justify-center">
+                                <span className="bg-white/20 text-white px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border border-white/30">
+                                    {role}
+                                </span>
+                                <span className="text-[8px] font-bold text-blue-200 uppercase tracking-widest bg-black/20 px-3 py-0.5 rounded border border-white/10">
+                                    {ministry}
+                                </span>
+                            </div>
                         </div>
-                        <div className="bg-white p-1.5 rounded-lg shadow-lg">
-                            <img src={qrUrl} className="w-12 h-12" alt="QR" crossOrigin="anonymous"/>
+
+                        {/* FOOTER */}
+                        <div className="mt-auto w-full px-2 relative z-10 flex items-end justify-between">
+                            <div className="text-left">
+                                <p className="text-[7px] font-bold text-blue-200 uppercase tracking-widest mb-0.5">ID MIEMBRO</p>
+                                <p className="text-sm font-black text-white tracking-widest leading-none font-mono">{id}</p>
+                            </div>
+                            <div className="bg-white p-1.5 rounded-lg shadow-lg">
+                                <img src={qrUrl} className="w-12 h-12" alt="QR" crossOrigin="anonymous"/>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -260,51 +260,77 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
 
         // DORSO
         return (
-            <div className={`w-full h-full ${DARK_BG} relative overflow-hidden flex flex-col p-6 font-sans text-white`}>
-                <div className={`absolute inset-0 ${DARK_BG} z-0`}></div>
+            <div className={`w-full h-full ${BRAND_DARK} relative overflow-hidden flex flex-col p-6 font-sans text-white`}>
+                {/* Fondo Sólido */}
+                <div className={`absolute inset-0 ${BRAND_DARK} z-0`}></div>
                 
                 <div className="relative z-10 text-center mb-6 mt-4">
-                    <div className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-2 text-brand-400 border border-white/10 shadow-lg shadow-brand-500/10">
+                    <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-2 text-blue-400 border border-white/20 shadow-lg">
                         <Icon name="User" size={22}/>
                     </div>
-                    <h3 className="font-bold text-white text-base tracking-wide uppercase">Contacto</h3>
+                    <h3 className="font-bold text-white text-base tracking-wide uppercase">Información de Contacto</h3>
                 </div>
 
                 <div className="relative z-10 flex-1 space-y-4">
-                    <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(m.phone)}} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg border border-emerald-400/30">
-                        <Icon name="MessageCircle" size={16} /> Enviar WhatsApp
-                    </button>
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                        <button onClick={(e)=>{e.stopPropagation(); makeCall(m.phone)}} className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all">
-                            <Icon name="Phone" size={14} /> Llamar
-                        </button>
-                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp('5491136278857', `Hola, soy ${firstName}, quiero agendar una visita.`)}} className="bg-slate-700/50 hover:bg-slate-600 text-slate-300 border border-slate-500/30 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all">
-                            <Icon name="Calendar" size={14} /> Visita
-                        </button>
-                    </div>
-
-                    <div className="bg-slate-800/60 p-4 rounded-xl border border-white/5 space-y-3 mt-2 backdrop-blur-sm">
-                        <div>
-                            <p className="text-[8px] text-slate-500 uppercase font-bold mb-0.5">Dirección</p>
-                            <div onClick={(e)=>{e.stopPropagation(); openMaps(m.address)}} className={m.address ? "cursor-pointer group" : ""}>
-                                <p className={`text-xs text-slate-200 leading-tight ${m.address ? 'group-hover:text-brand-400 transition-colors' : ''}`}>{m.address || 'No registrada'}</p>
+                    {/* Lista de Datos */}
+                    <div className="bg-slate-800/50 p-4 rounded-xl border border-white/10 space-y-3 backdrop-blur-sm divide-y divide-white/5">
+                        <div className="flex items-center gap-3 pb-2">
+                            <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400">
+                                <Icon name="Phone" size={14}/>
+                            </div>
+                            <div>
+                                <p className="text-[8px] text-slate-400 uppercase font-bold mb-0.5">Teléfono</p>
+                                <p className="text-xs text-white font-mono">{m.phone || 'No registrado'}</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3 py-2">
+                             <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400">
+                                <Icon name="Mail" size={14}/>
+                            </div>
+                            <div>
+                                <p className="text-[8px] text-slate-400 uppercase font-bold mb-0.5">Email</p>
+                                <p className="text-xs text-white truncate">{m.email || 'No registrado'}</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3 py-2 cursor-pointer group" onClick={(e)=>{e.stopPropagation(); openMaps(m.address)}}>
+                             <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400 group-hover:bg-blue-500/20 transition-colors">
+                                <Icon name="MapPin" size={14}/>
+                            </div>
+                            <div>
+                                <p className="text-[8px] text-slate-400 uppercase font-bold mb-0.5">Dirección</p>
+                                <p className={`text-xs text-white leading-tight ${m.address ? 'group-hover:text-blue-300 transition-colors' : ''}`}>{m.address || 'No registrada'}</p>
                             </div>
                         </div>
                         {(m.emergencyContact || m.emergencyPhone) && (
-                            <div className="pt-3 border-t border-white/5">
-                                <p className="text-[8px] text-red-400 font-bold uppercase flex items-center gap-1 mb-1">
-                                    <Icon name="AlertTriangle" size={10}/> Emergencia
-                                </p>
-                                <p className="text-xs font-bold text-white">{m.emergencyContact}</p>
-                                <p className="text-xs text-red-300 font-mono tracking-wide">{m.emergencyPhone}</p>
+                            <div className="flex items-center gap-3 pt-2">
+                                <div className="w-8 h-8 rounded-full bg-red-600/20 flex items-center justify-center text-red-400">
+                                    <Icon name="AlertTriangle" size={14}/>
+                                </div>
+                                <div>
+                                    <p className="text-[8px] text-red-400 font-bold uppercase mb-0.5">Emergencia</p>
+                                    <p className="text-xs font-bold text-white">{m.emergencyContact}</p>
+                                    <p className="text-xs text-red-300 font-mono tracking-wide">{m.emergencyPhone}</p>
+                                </div>
                             </div>
                         )}
                     </div>
+                    
+                    {/* Botones de Acción */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(m.phone)}} className="col-span-2 w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg border border-emerald-400/30">
+                            <Icon name="MessageCircle" size={16} /> Enviar WhatsApp
+                        </button>
+                        <button onClick={(e)=>{e.stopPropagation(); makeCall(m.phone)}} className="bg-blue-600/30 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all">
+                            <Icon name="Phone" size={14} /> Llamar
+                        </button>
+                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp('5491136278857', `Hola, soy ${firstName}, quiero agendar una visita.`)}} className="bg-slate-700/50 hover:bg-slate-600 text-slate-300 border border-slate-500/30 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all">
+                            <Icon name="Calendar" size={14} /> Visita Pastoral
+                        </button>
+                    </div>
                 </div>
                 
-                <div className="mt-auto text-center pt-3 border-t border-white/5 relative z-10">
-                    <p className="text-[8px] text-slate-500">CDS MI CASA • {year}</p>
+                <div className="mt-auto text-center pt-3 border-t border-white/10 relative z-10">
+                    <p className="text-[8px] text-slate-400">CDS MI CASA • {year}</p>
                 </div>
             </div>
         );
