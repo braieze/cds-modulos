@@ -434,7 +434,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
                 .rotate-y-180 { transform: rotateY(180deg); }
                 .custom-scrollbar::-webkit-scrollbar { width: 3px; }
                 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-            }</style>
+            `}</style>
         </div>
     );
 };
