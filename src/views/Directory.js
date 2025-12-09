@@ -9,7 +9,9 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
     // 2. ESTADOS
     const [localMembers, setLocalMembers] = useState([]);
     
+    // Sincronización con Base de Datos
     useEffect(() => {
+        // Combinamos members o directory según lo que llegue de App.js
         const incoming = Array.isArray(members) ? members : (Array.isArray(directory) ? directory : []);
         setLocalMembers(incoming);
     }, [members, directory]);
@@ -20,15 +22,14 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
     const [isFlipped, setIsFlipped] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
     
-    // Estado del Formulario
+    // Formulario (Agregado campo 'area')
     const initialForm = { 
-        id: '', name: '', role: 'Miembro', email: '', phone: '', 
+        id: '', name: '', role: 'Miembro', area: 'General', email: '', phone: '', 
         address: '', birthDate: '', emergencyContact: '', emergencyPhone: '', photo: '', joinedDate: '' 
     };
     const [form, setForm] = useState(initialForm);
 
-    const cardRef = useRef(null); // Referencia visual
-    const printRef = useRef(null); // Referencia oculta para PDF
+    const printRef = useRef(null); // Referencia oculta para PDF HD
 
     // 3. HELPERS
     const getField = (item, ...keys) => {
@@ -38,13 +39,14 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
 
     const getPhoto = (photoUrl, name) => {
         if (photoUrl && photoUrl.length > 5) {
+            // Fix para Google Drive
             if (photoUrl.includes('drive.google.com')) {
                 const idMatch = photoUrl.match(/[-\w]{25,}/);
                 if (idMatch) return `https://drive.google.com/uc?export=view&id=${idMatch[0]}`;
             }
             return photoUrl;
         }
-        return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=e2e8f0&color=1e293b&size=512&font-size=0.33`;
+        return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=0f172a&color=cbd5e1&size=512&font-size=0.33`;
     };
 
     const generateCustomID = (name) => {
@@ -54,29 +56,33 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
         return `CDS-${initials}-${randomNum}`;
     };
 
-    const openWhatsApp = (phone) => {
-        if (!phone) return Utils.notify('Sin número', 'error');
-        const p = phone.replace(/\D/g, '');
-        window.open(`https://wa.me/${p}`, '_blank');
+    // Funciones de Contacto Corregidas
+    const openWhatsApp = (phone, message = '') => {
+        if (!phone) return Utils.notify('Sin número registrado', 'error');
+        const p = phone.replace(/\D/g, ''); // Limpiar todo lo que no sea número
+        const url = `https://wa.me/${p}${message ? `?text=${encodeURIComponent(message)}` : ''}`;
+        window.open(url, '_blank');
     };
     
     const makeCall = (phone) => {
-        if (!phone) return Utils.notify('Sin número', 'error');
-        window.open(`tel:${phone}`, '_self');
+        if (!phone) return Utils.notify('Sin número registrado', 'error');
+        const p = phone.replace(/\D/g, '');
+        window.location.href = `tel:${p}`;
     };
 
     const openMaps = (address) => {
-        if (!address) return Utils.notify('Sin dirección', 'error');
+        if (!address) return Utils.notify('Sin dirección registrada', 'error');
         const q = encodeURIComponent(address);
         window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, '_blank');
     };
 
-    // 4. LÓGICA CRUD MEJORADA
+    // 4. LÓGICA CRUD (Persistencia Firebase)
     const handleEdit = (member) => {
         setForm({
             id: member.id,
             name: getField(member, 'name', 'nombre') || '',
             role: getField(member, 'role', 'rol') || 'Miembro',
+            area: getField(member, 'area', 'ministerio') || 'General',
             email: getField(member, 'email', 'correo') || '',
             phone: getField(member, 'phone', 'telefono', 'celular') || '',
             address: getField(member, 'address', 'direccion') || '',
@@ -95,62 +101,85 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
     };
 
     const handleDelete = (id) => {
-        if(!confirm("¿Estás seguro de eliminar?")) return;
-        if (typeof deleteData === 'function') deleteData('directory', id);
+        if(!confirm("¿Estás seguro de eliminar a este miembro permanentemente?")) return;
+        
+        // Llamada a la BD
+        if (typeof deleteData === 'function') {
+            deleteData('directory', id);
+            Utils.notify("Eliminando...");
+        } else {
+            Utils.notify("Error: No hay conexión a BD", "error");
+        }
+        
+        // Optimistic UI update
         setLocalMembers(prev => prev.filter(m => m.id !== id));
         if (selectedMember?.id === id) setSelectedMember(null);
-        Utils.notify("Eliminado correctamente");
     };
 
     const handleSave = () => {
-        if (!form.name) return Utils.notify("Nombre obligatorio", 'error');
+        if (!form.name) return Utils.notify("El nombre es obligatorio", 'error');
         
-        // Objeto de datos completo asegurando campos opcionales
-        let memberData = {
-            ...form,
-            id: form.id || generateCustomID(form.name),
+        // LIMPIEZA DE DATOS (Crucial para Firebase)
+        // Convertimos undefined a string vacíos
+        const cleanData = {
+            name: form.name || '',
+            role: form.role || 'Miembro',
+            area: form.area || 'General',
+            email: form.email || '',
+            phone: form.phone || '',
+            address: form.address || '',
+            birthDate: form.birthDate || '',
             emergencyContact: form.emergencyContact || '',
             emergencyPhone: form.emergencyPhone || '',
-            address: form.address || '',
-            photo: form.photo || ''
+            photo: form.photo || '',
+            joinedDate: form.joinedDate || '',
+            updatedAt: new Date().toISOString()
         };
 
-        const exists = localMembers.find(m => m.id === form.id);
+        const isNew = !form.id;
+        const id = form.id || generateCustomID(form.name);
+        
+        // Objeto final con ID
+        const finalPayload = { ...cleanData, id };
 
-        if (exists) {
-            // Actualizar
-            if (typeof updateData === 'function') updateData('directory', form.id, memberData);
-            setLocalMembers(prev => prev.map(m => m.id === form.id ? memberData : m));
-            // IMPORTANTE: Actualizar el modal si está abierto
-            if(selectedMember && selectedMember.id === form.id) setSelectedMember(memberData);
-            Utils.notify("Cambios guardados");
+        if (!isNew) {
+            // EDITAR
+            if (typeof updateData === 'function') {
+                updateData('directory', id, finalPayload);
+                Utils.notify("Guardando cambios...");
+            }
+            // Actualizar estado local
+            setLocalMembers(prev => prev.map(m => m.id === id ? finalPayload : m));
+            if(selectedMember && selectedMember.id === id) setSelectedMember(finalPayload);
         } else {
-            // Crear
-            if (typeof addData === 'function') addData('directory', memberData);
-            setLocalMembers(prev => [...prev, memberData]);
-            Utils.notify("Nuevo miembro creado");
+            // CREAR
+            finalPayload.createdAt = new Date().toISOString();
+            if (typeof addData === 'function') {
+                addData('directory', finalPayload);
+                Utils.notify("Creando miembro...");
+            }
+            setLocalMembers(prev => [...prev, finalPayload]);
         }
         setIsEditing(false);
     };
 
-    // Filtro
     const filteredMembers = useMemo(() => {
         const term = searchTerm.toLowerCase();
         return localMembers.filter(m => {
             const name = getField(m, 'name', 'nombre') || '';
             const role = getField(m, 'role', 'rol') || '';
-            return name.toLowerCase().includes(term) || role.toLowerCase().includes(term);
+            const area = getField(m, 'area') || '';
+            return name.toLowerCase().includes(term) || role.toLowerCase().includes(term) || area.toLowerCase().includes(term);
         });
     }, [localMembers, searchTerm]);
 
-    // 5. GENERADOR PDF (USANDO REFERENCIA PLANA OCULTA)
+    // 5. GENERADOR PDF (Calidad HD)
     const downloadPDF = async () => {
         if (!selectedMember || !printRef.current) return;
         setIsDownloading(true);
 
         setTimeout(async () => {
             try {
-                // Cargar librería si no existe
                 if (!window.html2pdf) {
                     await new Promise((resolve) => {
                         const script = document.createElement('script');
@@ -161,164 +190,165 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                 }
                 
                 const element = printRef.current;
-                element.style.display = 'block'; // Mostrar temporalmente
+                element.style.display = 'block'; // Mostrar para captura
                 
                 const opt = {
                     margin: 0,
                     filename: `Credencial_${selectedMember.name.replace(/\s+/g,'_')}.pdf`,
                     image: { type: 'jpeg', quality: 1 },
-                    html2canvas: { scale: 4, useCORS: true, logging: false },
-                    // Tamaño físico tarjeta crédito (CR80): 53.98mm x 85.60mm
+                    html2canvas: { scale: 4, useCORS: true, logging: false, backgroundColor: '#0f172a' },
+                    // Tamaño exacto tarjeta CR80 (54mm x 86mm)
                     jsPDF: { unit: 'mm', format: [54, 86], orientation: 'portrait' } 
                 };
                 
                 await window.html2pdf().set(opt).from(element).save();
-                element.style.display = 'none'; // Ocultar de nuevo
-                Utils.notify("PDF Descargado");
+                element.style.display = 'none'; // Ocultar
+                Utils.notify("Credencial descargada");
             } catch (error) { 
                 console.error(error); 
                 Utils.notify("Error al generar PDF", 'error'); 
             }
             setIsDownloading(false);
-        }, 300);
+        }, 500);
     };
 
-    // --- COMPONENTE DE TARJETA (REUTILIZABLE) ---
-    // Este componente dibuja la credencial. Se usa para verla en pantalla (3D) y para imprimirla (Plana)
+    // --- TARJETA REUTILIZABLE (Vista y Print) ---
     const CardContent = ({ m, isFront }) => {
         if (!m) return null;
+        
+        // Datos
         const id = m.id || generateCustomID(m.name);
         const name = getField(m, 'name', 'nombre') || 'Sin Nombre';
         const nameParts = name.split(' ');
         const firstName = nameParts[0];
         const lastName = nameParts.slice(1).join(' ');
         const role = getField(m, 'role', 'rol') || 'Miembro';
+        const area = getField(m, 'area') || 'General';
         const photo = getPhoto(getField(m, 'photo', 'foto'), name);
+        const expirationYear = new Date().getFullYear();
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${id}`;
+        
+        // Datos Privados
         const email = getField(m, 'email', 'correo');
         const phone = getField(m, 'phone', 'telefono');
         const address = getField(m, 'address', 'direccion');
         const emerContact = getField(m, 'emergencyContact', 'contactoEmergencia');
         const emerPhone = getField(m, 'emergencyPhone', 'telefonoEmergencia');
-        const expirationYear = new Date().getFullYear();
-        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${id}`;
 
-        // Color azul oscuro unificado para atrás y abajo-adelante
-        const DARK_BG = "bg-[#0f172a]"; // Slate 900 personalizado
+        // Color Base (Azul Oscuro Profundo)
+        const BASE_COLOR = "bg-[#0f172a]";
 
         if (isFront) {
             return (
-                <div className="w-full h-full bg-white relative overflow-hidden flex flex-col items-center">
+                <div className={`w-full h-full ${BASE_COLOR} relative overflow-hidden flex flex-col items-center border-4 border-slate-800`}>
                     
-                    {/* 1. SECCIÓN SUPERIOR (BLANCA) */}
-                    <div className="w-full h-[220px] bg-slate-50 relative pt-8 text-center z-10">
-                        <div className="flex justify-between px-6 mb-2">
-                            <span className="text-[8px] font-black text-slate-400 tracking-[0.2em] uppercase">CONQUISTADORES</span>
-                            <span className="text-[8px] font-black text-slate-400 tracking-widest">{expirationYear}</span>
-                        </div>
-                        
-                        <h1 className="text-xl font-bold text-slate-800 leading-tight tracking-tight mb-0.5">Credencial Digital</h1>
-                        <p className="text-[10px] text-brand-600 font-bold uppercase tracking-wider">{role}</p>
+                    {/* Fondo y Efectos */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-[#0f172a] to-[#1e1b4b] z-0"></div>
+                    <div className="absolute -top-24 -right-24 w-60 h-60 bg-blue-600/20 rounded-full blur-[80px] pointer-events-none"></div>
+                    <div className="absolute top-1/3 -left-20 w-40 h-40 bg-indigo-500/10 rounded-full blur-[60px] pointer-events-none"></div>
 
-                        {/* Foto Flotante ("Muerde" la sección de abajo) */}
-                        <div className="absolute left-1/2 -translate-x-1/2 -bottom-[70px] w-[140px] h-[140px] bg-slate-50 rounded-full flex items-center justify-center shadow-[0_0_0_8px_#f8fafc] z-20">
-                            <img src={photo} className="w-[130px] h-[130px] rounded-full object-cover bg-white shadow-inner" alt={name} crossOrigin="anonymous"/>
+                    {/* Header */}
+                    <div className="relative z-10 w-full pt-8 px-5 flex flex-col items-center">
+                        <p className="text-[9px] font-black text-slate-400 tracking-[0.3em] uppercase mb-2">CONQUISTADORES</p>
+                        <h2 className="text-sm font-black text-white uppercase tracking-widest border-b-2 border-brand-500 pb-1">CDS MI CASA</h2>
+                    </div>
+
+                    {/* Foto Central */}
+                    <div className="relative z-10 mt-6 mb-4">
+                        {/* Anillos decorativos */}
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150px] h-[150px] border border-blue-500/30 rounded-full animate-pulse"></div>
+                        <div className="w-[140px] h-[140px] rounded-full p-1 bg-gradient-to-tr from-brand-500 to-indigo-600 shadow-2xl shadow-black/60">
+                            <img src={photo} className="w-full h-full object-cover rounded-full bg-slate-800 border-2 border-slate-900" alt={name} crossOrigin="anonymous"/>
+                        </div>
+                        {/* Badge ROL */}
+                        <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-brand-600 to-brand-500 text-white px-4 py-1 rounded-full shadow-lg border border-brand-400/50">
+                            <span className="text-[10px] font-black uppercase tracking-widest">{role}</span>
                         </div>
                     </div>
 
-                    {/* 2. SECCIÓN INFERIOR (AZUL OSCURO - IGUAL AL DORSO) */}
-                    <div className={`flex-1 w-full ${DARK_BG} relative pt-[80px] px-6 flex flex-col items-center text-center z-0`}>
+                    {/* Datos Principales */}
+                    <div className="relative z-10 text-center px-4 mb-auto mt-2">
+                        <h1 className="text-2xl font-black text-white leading-none mb-1 drop-shadow-lg">{firstName}</h1>
+                        <h2 className="text-xl font-bold text-slate-300 leading-tight mb-2">{lastName}</h2>
                         
-                        {/* Decoración Unión */}
-                        <div className="absolute top-0 left-0 w-full h-6 bg-slate-50 rounded-b-[50%] scale-x-150 -translate-y-1/2 z-0"></div>
+                        {/* Área */}
+                        <p className="text-[9px] font-bold text-brand-300 uppercase tracking-widest bg-brand-900/30 px-3 py-1 rounded-lg inline-block border border-brand-500/20">
+                            {area}
+                        </p>
+                    </div>
 
-                        {/* Nombres */}
-                        <div className="relative z-10 mb-auto">
-                            <h2 className="text-2xl font-bold text-white leading-none">{firstName}</h2>
-                            <h2 className="text-2xl font-bold text-brand-400 leading-tight">{lastName}</h2>
+                    {/* Footer */}
+                    <div className="relative z-10 w-full px-6 pb-6 pt-3 flex items-end justify-between mt-2">
+                        <div className="text-left">
+                            <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">VENCIMIENTO</p>
+                            <p className="text-base font-black text-white tracking-wider">DIC {expirationYear}</p>
                         </div>
-
-                        {/* Footer ID y QR */}
-                        <div className="w-full bg-white/5 backdrop-blur-md rounded-xl p-3 border border-white/10 flex items-center justify-between mb-6 relative z-10">
-                            <div className="text-left">
-                                <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-1">ID ÚNICO</p>
-                                <p className="text-xs font-mono font-bold text-white tracking-widest">{id.slice(0,12)}</p>
-                            </div>
-                            <div className="bg-white p-1 rounded-lg">
-                                <img src={qrUrl} className="w-10 h-10" alt="QR" crossOrigin="anonymous"/>
-                            </div>
+                        <div className="bg-white p-1 rounded-lg shadow-lg">
+                            <img src={qrUrl} className="w-12 h-12" alt="QR" crossOrigin="anonymous"/>
                         </div>
                     </div>
                 </div>
             );
         }
 
-        // DORSO (AZUL OSCURO SÓLIDO)
+        // DORSO
         return (
-            <div className={`w-full h-full ${DARK_BG} relative overflow-hidden flex flex-col p-6`}>
-                {/* Capa de seguridad visual */}
-                <div className={`absolute inset-0 ${DARK_BG} z-[-1]`}></div>
+            <div className={`w-full h-full ${BASE_COLOR} relative overflow-hidden flex flex-col p-6 border-4 border-slate-800`}>
+                <div className="absolute inset-0 bg-gradient-to-t from-[#020617] to-[#0f172a] z-0"></div>
                 
-                <div className="mt-6 text-center mb-6">
-                    <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-2 text-brand-400 border border-white/10">
-                        <Icon name="User" size={20}/>
+                <div className="relative z-10 text-center mb-6 mt-4">
+                    <div className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-3 text-brand-400 border border-white/10 shadow-[0_0_15px_rgba(59,130,246,0.2)]">
+                        <Icon name="User" size={24}/>
                     </div>
-                    <h3 className="font-bold text-white text-base tracking-wide">Datos de Contacto</h3>
+                    <h3 className="font-bold text-white text-lg tracking-wide">Contacto</h3>
                 </div>
 
                 <div className="flex-1 space-y-4 relative z-10">
-                    {/* Botones */}
-                    <div className="grid grid-cols-2 gap-3">
-                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(phone)}} className="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 py-2 rounded-xl font-bold text-[10px] flex items-center justify-center gap-1">
-                            <Icon name="MessageCircle" size={12} /> WhatsApp
+                    {/* Botones Grandes */}
+                    <div className="grid grid-cols-1 gap-3">
+                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(phone, `Hola ${name}, te escribo desde la App Conquistadores.`)}} className="bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/50">
+                            <Icon name="MessageCircle" size={16} /> Enviar WhatsApp
                         </button>
-                        <button onClick={(e)=>{e.stopPropagation(); makeCall(phone)}} className="bg-blue-600/20 text-blue-400 border border-blue-500/30 py-2 rounded-xl font-bold text-[10px] flex items-center justify-center gap-1">
-                            <Icon name="Phone" size={12} /> Llamar
-                        </button>
+                        
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={(e)=>{e.stopPropagation(); makeCall(phone)}} className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2">
+                                <Icon name="Phone" size={14} /> Llamar
+                            </button>
+                            <button onClick={(e)=>{e.stopPropagation(); openWhatsApp('5491100000000', `Hola, quiero agendar una visita con ${name}.`)}} className="bg-brand-600/20 hover:bg-brand-600/30 text-brand-400 border border-brand-500/30 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2">
+                                <Icon name="Calendar" size={14} /> Agendar Visita
+                            </button>
+                        </div>
                     </div>
 
-                    <div className="bg-white/5 p-4 rounded-xl border border-white/5 space-y-3">
+                    <div className="bg-slate-800/50 p-4 rounded-xl border border-white/5 space-y-3 mt-2">
                         <div>
-                            <p className="text-[8px] text-slate-500 uppercase font-bold mb-0.5">Teléfono</p>
-                            <p className="text-sm text-slate-200 font-mono">{phone || '-'}</p>
-                        </div>
-                        <div onClick={(e)=>{e.stopPropagation(); openMaps(address)}} className={address ? "cursor-pointer" : ""}>
                             <p className="text-[8px] text-slate-500 uppercase font-bold mb-0.5">Dirección</p>
-                            <p className={`text-xs text-slate-200 leading-tight ${address ? 'underline decoration-slate-600' : ''}`}>{address || '-'}</p>
+                            <div onClick={(e)=>{e.stopPropagation(); openMaps(address)}} className={address ? "cursor-pointer group" : ""}>
+                                <p className={`text-xs text-slate-200 leading-tight ${address ? 'group-hover:text-blue-400 transition-colors' : ''}`}>{address || 'No registrada'}</p>
+                            </div>
                         </div>
-                        <div>
-                            <p className="text-[8px] text-slate-500 uppercase font-bold mb-0.5">Email</p>
-                            <p className="text-[10px] text-slate-200 break-all">{email || '-'}</p>
-                        </div>
+                        {(emerContact || emerPhone) && (
+                            <div className="pt-2 border-t border-white/5">
+                                <p className="text-[8px] text-red-400 font-bold uppercase flex items-center gap-1 mb-1">
+                                    <Icon name="AlertTriangle" size={10}/> En caso de emergencia
+                                </p>
+                                <p className="text-xs font-bold text-white">{emerContact}</p>
+                                <p className="text-xs text-red-300 font-mono tracking-wide">{emerPhone}</p>
+                            </div>
+                        )}
                     </div>
-
-                    {(emerContact || emerPhone) && (
-                        <div className="bg-red-500/10 p-3 rounded-xl border border-red-500/20">
-                            <p className="text-[8px] text-red-400 font-bold uppercase flex items-center gap-1 mb-1">
-                                <Icon name="AlertTriangle" size={10}/> Emergencia
-                            </p>
-                            <p className="text-xs font-bold text-white">{emerContact}</p>
-                            <p className="text-xs text-red-300 font-mono">{emerPhone}</p>
-                        </div>
-                    )}
                 </div>
                 
                 <div className="mt-auto text-center pt-4 border-t border-white/5">
-                    <p className="text-[8px] text-slate-500">Uso exclusivo interno • {expirationYear}</p>
+                    <p className="text-[8px] text-slate-600">CDS MI CASA • 2025</p>
                 </div>
             </div>
         );
     };
 
-    // --- VISTA PRINCIPAL ---
+    // --- RENDERIZADO PRINCIPAL ---
     return (
-        <div className="space-y-6 fade-in pb-24 font-sans">
-            <style>{`
-                .perspective-1000 { perspective: 1000px; }
-                .transform-style-3d { transform-style: preserve-3d; }
-                .backface-hidden { backface-visibility: hidden; }
-                .rotate-y-180 { transform: rotateY(180deg); }
-            `}</style>
-
+        <div className="space-y-6 fade-in pb-24 font-sans text-slate-800">
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="flex items-center gap-3">
@@ -368,57 +398,62 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
             {/* Modal CREAR / EDITAR */}
             <Modal isOpen={isEditing} onClose={()=>setIsEditing(false)} title={form.id ? "Editar Miembro" : "Nuevo Miembro"}>
                 <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
-                    <Input label="Link Foto (Drive o URL)" value={form.photo} onChange={e=>setForm({...form, photo:e.target.value})} placeholder="https://..." />
+                    <Input label="Link Foto (URL o Drive)" value={form.photo} onChange={e=>setForm({...form, photo:e.target.value})} placeholder="https://..." />
                     <div className="grid grid-cols-2 gap-3">
-                        <Input label="Nombre" value={form.name} onChange={e=>setForm({...form, name:e.target.value})} />
+                        <Input label="Nombre Completo" value={form.name} onChange={e=>setForm({...form, name:e.target.value})} />
                         <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase">Rol</label>
+                            <label className="text-xs font-bold text-slate-500 uppercase">Rol / Cargo</label>
                             <select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-brand-500" value={form.role} onChange={e=>setForm({...form, role:e.target.value})}>
-                                <option>Miembro</option><option>Líder</option><option>Pastor</option><option>Músico</option><option>Maestro</option>
+                                <option>Miembro</option><option>Líder</option><option>Pastor</option><option>Músico</option><option>Maestro</option><option>Diácono</option><option>Servidor</option>
                             </select>
                         </div>
                     </div>
+                    <Input label="Área / Ministerio" value={form.area} onChange={e=>setForm({...form, area:e.target.value})} placeholder="Ej: Alabanza, Jóvenes, Niños" />
+                    
                     <div className="grid grid-cols-2 gap-3">
-                        <Input label="Teléfono" value={form.phone} onChange={e=>setForm({...form, phone:e.target.value})} />
+                        <Input label="Teléfono" value={form.phone} onChange={e=>setForm({...form, phone:e.target.value})} placeholder="549..." />
                         <Input label="Email" type="email" value={form.email} onChange={e=>setForm({...form, email:e.target.value})} />
                     </div>
                     <Input label="Dirección" value={form.address} onChange={e=>setForm({...form, address:e.target.value})} />
+                    
                     <div className="pt-4 border-t border-slate-100">
-                        <p className="text-xs font-bold text-slate-400 uppercase mb-2">Emergencia</p>
+                        <p className="text-xs font-bold text-slate-400 uppercase mb-2">Emergencia (Opcional)</p>
                         <div className="grid grid-cols-2 gap-3">
                             <Input label="Contacto" value={form.emergencyContact} onChange={e=>setForm({...form, emergencyContact:e.target.value})} />
                             <Input label="Teléfono" value={form.emergencyPhone} onChange={e=>setForm({...form, emergencyPhone:e.target.value})} />
                         </div>
                     </div>
+                    <div className="grid grid-cols-2 gap-3 pt-2">
+                        <Input type="date" label="Nacimiento" value={form.birthDate} onChange={e=>setForm({...form, birthDate:e.target.value})} />
+                        <Input type="date" label="Ingreso" value={form.joinedDate} onChange={e=>setForm({...form, joinedDate:e.target.value})} />
+                    </div>
                     <Button className="w-full mt-4" onClick={handleSave}>Guardar Datos</Button>
                 </div>
             </Modal>
 
-            {/* ELEMENTO OCULTO SOLO PARA IMPRESIÓN PDF (SIN 3D, PLANO) */}
+            {/* ELEMENTO OCULTO PARA PDF (CALIDAD HD - SOLO FRENTE - TAMAÑO TARJETA) */}
             {selectedMember && (
                 <div ref={printRef} style={{ display: 'none', width: '340px', height: '540px' }}>
                     <CardContent m={selectedMember} isFront={true} />
                 </div>
             )}
 
-            {/* Modal CREDENCIAL (Vista en pantalla con giro 3D) */}
+            {/* Modal CREDENCIAL (Vista en pantalla con giro) */}
             {selectedMember && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm transition-opacity" onClick={() => setSelectedMember(null)}></div>
+                    <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-md transition-opacity" onClick={() => setSelectedMember(null)}></div>
                     <div className="relative z-10 animate-enter flex flex-col items-center gap-6">
                         
                         <div className="perspective-1000 w-[320px] h-[520px] cursor-pointer group select-none relative" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
                             <div className={`relative w-full h-full duration-700 transform-style-3d transition-all ${isFlipped ? 'rotate-y-180' : ''}`}>
                                 
-                                {/* Frente */}
-                                <div className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden bg-slate-900 border border-slate-800">
+                                <div className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden bg-slate-900 border-4 border-slate-800">
                                     <CardContent m={selectedMember} isFront={true} />
-                                    <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-slate-500 flex items-center gap-1 z-50 bg-white/10 px-2 py-0.5 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
+                                    <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-slate-500 flex items-center gap-1 z-50 bg-slate-800/80 px-2 py-0.5 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
                                 </div>
                                 
-                                {/* Dorso - CON FONDO SOLIDO GARANTIZADO */}
-                                <div className="absolute w-full h-full backface-hidden rotate-y-180 rounded-[24px] shadow-2xl overflow-hidden bg-slate-900 border border-slate-800">
-                                    {/* Capa de bloqueo extra */}
+                                <div className="absolute w-full h-full backface-hidden rotate-y-180 rounded-[24px] shadow-2xl overflow-hidden bg-slate-900 border-4 border-slate-800">
+                                    {/* Capa Bloqueo Visual */}
                                     <div className="absolute inset-0 bg-[#0f172a] z-[-1]"></div> 
                                     <CardContent m={selectedMember} isFront={false} />
                                 </div>
@@ -431,7 +466,7 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                             </button>
                             <button onClick={downloadPDF} disabled={isDownloading} className="bg-blue-600 text-white px-5 py-2.5 rounded-full font-bold shadow-lg hover:bg-blue-500 text-xs flex items-center gap-2 disabled:opacity-50">
                                 {isDownloading ? <Icon name="Loader" className="animate-spin" size={14}/> : <Icon name="Download" size={14}/>}
-                                {isDownloading ? 'Generando...' : 'Descargar PDF (Solo Frente)'}
+                                {isDownloading ? 'Generando...' : 'Descargar Credencial'}
                             </button>
                         </div>
                     </div>
@@ -440,5 +475,3 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
         </div>
     );
 };
-
-
