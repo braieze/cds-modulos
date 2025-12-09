@@ -1,70 +1,49 @@
 window.Views = window.Views || {};
 
-window.Views.Directory = ({ userProfile }) => {
+window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
     // 1. HOOKS
-    const { useState, useMemo, useRef, useEffect } = React;
+    const { useState, useMemo, useRef } = React;
     const Utils = window.Utils || {};
-    const { Icon, Button, Input, Modal } = Utils;
+    const { Icon, Button, Input, Modal, Select } = Utils;
 
     // 2. ESTADOS
-    const [members, setMembers] = useState([]);
-    const [loading, setLoading] = useState(true);
-    
     const [searchTerm, setSearchTerm] = useState('');
-    const [selectedMember, setSelectedMember] = useState(null);
-    const [isEditing, setIsEditing] = useState(false);
-    const [isFlipped, setIsFlipped] = useState(false);
+    const [selectedMember, setSelectedMember] = useState(null); // Para ver credencial
+    const [isEditing, setIsEditing] = useState(false); // Para crear/editar
+    const [isFlipped, setIsFlipped] = useState(false); // Efecto 3D
     const [isDownloading, setIsDownloading] = useState(false);
     
-    // Formulario
+    // Estado del Formulario
     const initialForm = { 
-        name: '', role: 'Miembro', area: 'General', email: '', phone: '', 
+        id: '', name: '', role: 'Miembro', ministry: 'General', email: '', phone: '', 
         address: '', birthDate: '', emergencyContact: '', emergencyPhone: '', photo: '', joinedDate: '' 
     };
     const [form, setForm] = useState(initialForm);
-    const [formId, setFormId] = useState(null);
 
-    // Referencias
-    const printRef = useRef(null); // Referencia oculta para PDF
+    // Referencia oculta para generar el PDF limpio
+    const printRef = useRef(null);
 
-    // 3. CONEXIÓN DIRECTA A FIREBASE (CRUCIAL PARA QUE GUARDE)
-    useEffect(() => {
-        if (!window.db) {
-            console.error("Error crítico: No hay conexión a Firebase (window.db es undefined).");
-            setLoading(false);
-            return;
-        }
+    // 3. HELPERS
+    const getField = (item, ...keys) => {
+        if(!item) return null;
+        for (let key of keys) if (item[key] !== undefined) return item[key];
+        return null;
+    };
 
-        // Escuchar cambios en tiempo real
-        const unsubscribe = window.db.collection('directory').onSnapshot(snapshot => {
-            const data = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            setMembers(data);
-            setLoading(false);
-        }, error => {
-            console.error("Error Firebase:", error);
-            Utils.notify("Error de conexión", "error");
-            setLoading(false);
-        });
-
-        return () => unsubscribe();
-    }, []);
-
-    // 4. HELPERS
     const getPhoto = (photoUrl, name) => {
         if (photoUrl && photoUrl.length > 10) {
-            // Intento de fix para Google Drive
+            // Fix para enlaces de Google Drive
             if (photoUrl.includes('drive.google.com')) {
                 const idMatch = photoUrl.match(/[-\w]{25,}/);
                 if (idMatch) return `https://drive.google.com/uc?export=view&id=${idMatch[0]}`;
             }
             return photoUrl;
         }
+        // Avatar por defecto si no hay foto
         return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=0f172a&color=cbd5e1&size=512&font-size=0.33`;
     };
 
+    // Generador de ID Personalizado (CDS + Iniciales + Random)
     const generateCustomID = (name) => {
         if (!name) return 'CDS-0000';
         const initials = name.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase();
@@ -73,202 +52,188 @@ window.Views.Directory = ({ userProfile }) => {
     };
 
     const openWhatsApp = (phone, message = '') => {
-        if (!phone) return Utils.notify('Sin número', 'error');
+        if (!phone) return Utils.notify('Sin número registrado', 'error');
         const p = phone.replace(/\D/g, ''); 
         window.open(`https://wa.me/${p}${message ? `?text=${encodeURIComponent(message)}` : ''}`, '_blank');
     };
     
     const makeCall = (phone) => {
-        if (!phone) return Utils.notify('Sin número', 'error');
+        if (!phone) return Utils.notify('Sin número registrado', 'error');
         window.location.href = `tel:${phone.replace(/\D/g, '')}`;
     };
 
     const openMaps = (address) => {
-        if (!address) return Utils.notify('Sin dirección', 'error');
+        if (!address) return Utils.notify('Sin dirección registrada', 'error');
         window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`, '_blank');
     };
 
-    // 5. CRUD DIRECTO (GUARDA SÍ O SÍ)
+    // 4. LÓGICA CRUD (Conectada a colección 'members')
     const handleEdit = (member) => {
+        // Rellenar formulario con datos existentes o defaults
         setForm({
-            name: member.name || '',
-            role: member.role || 'Miembro',
-            area: member.area || 'General',
-            email: member.email || '',
-            phone: member.phone || '',
-            address: member.address || '',
-            birthDate: member.birthDate || '',
-            emergencyContact: member.emergencyContact || '',
-            emergencyPhone: member.emergencyPhone || '',
-            photo: member.photo || '',
-            joinedDate: member.joinedDate || ''
+            id: member.id,
+            name: getField(member, 'name', 'nombre') || '',
+            role: getField(member, 'role', 'rol') || 'Miembro',
+            ministry: getField(member, 'ministry', 'area', 'ministerio') || 'General',
+            email: getField(member, 'email', 'correo') || '',
+            phone: getField(member, 'phone', 'telefono', 'celular') || '',
+            address: getField(member, 'address', 'direccion') || '',
+            birthDate: getField(member, 'birthDate', 'fechaNacimiento') || '',
+            emergencyContact: getField(member, 'emergencyContact', 'contactoEmergencia') || '',
+            emergencyPhone: getField(member, 'emergencyPhone', 'telefonoEmergencia') || '',
+            photo: getField(member, 'photo', 'foto') || '',
+            joinedDate: getField(member, 'joinedDate', 'fechaIngreso') || ''
         });
-        setFormId(member.id);
         setIsEditing(true);
     };
 
     const handleNew = () => {
         setForm({ ...initialForm, joinedDate: new Date().toISOString().split('T')[0] });
-        setFormId(null);
         setIsEditing(true);
     };
 
-    const handleDelete = async (id) => {
-        if(!confirm("¿Eliminar definitivamente?")) return;
-        try {
-            await window.db.collection('directory').doc(id).delete();
-            Utils.notify("Eliminado");
-            if (selectedMember?.id === id) setSelectedMember(null);
-        } catch (e) {
-            console.error(e);
-            Utils.notify("Error al eliminar", "error");
-        }
+    const handleDelete = (id) => {
+        if(!confirm("¿Estás seguro de eliminar a este miembro permanentemente?")) return;
+        deleteData('members', id); // USAMOS LA COLECCIÓN CORRECTA 'members'
+        if (selectedMember?.id === id) setSelectedMember(null);
+        Utils.notify("Miembro eliminado");
     };
 
-    const handleSave = async () => {
-        if (!form.name) return Utils.notify("Nombre obligatorio", 'error');
+    const handleSave = () => {
+        if (!form.name) return Utils.notify("El nombre es obligatorio", 'error');
         
-        // Limpiamos datos undefined
-        const cleanData = Object.keys(form).reduce((acc, key) => {
-            acc[key] = form[key] === undefined ? '' : form[key];
-            return acc;
-        }, {});
+        // 1. Limpieza de datos (undefined -> string vacío)
+        const cleanData = {
+            name: form.name || '',
+            role: form.role || 'Miembro',
+            ministry: form.ministry || 'General',
+            email: form.email || '',
+            phone: form.phone || '',
+            address: form.address || '',
+            birthDate: form.birthDate || '',
+            emergencyContact: form.emergencyContact || '',
+            emergencyPhone: form.emergencyPhone || '',
+            photo: form.photo || '',
+            joinedDate: form.joinedDate || '',
+            // Si no tiene credentialId, lo generamos una sola vez
+            credentialId: form.credentialId || generateCustomID(form.name)
+        };
 
-        // ID Personalizado
-        if (!cleanData.credentialId) {
-            cleanData.credentialId = generateCustomID(cleanData.name);
-        }
-
-        try {
-            if (formId) {
-                // UPDATE
-                await window.db.collection('directory').doc(formId).update(cleanData);
-                if(selectedMember && selectedMember.id === formId) setSelectedMember({id: formId, ...cleanData});
-                Utils.notify("Guardado");
-            } else {
-                // CREATE
-                cleanData.createdAt = new Date().toISOString();
-                await window.db.collection('directory').add(cleanData);
-                Utils.notify("Creado");
+        if (form.id) {
+            // EDITAR
+            updateData('members', form.id, cleanData);
+            // Actualizar vista modal si está abierta
+            if(selectedMember && selectedMember.id === form.id) {
+                setSelectedMember({ id: form.id, ...cleanData });
             }
-            setIsEditing(false);
-        } catch (e) {
-            console.error("Error guardando:", e);
-            Utils.notify("Error al guardar. Revisa la consola.", "error");
+            Utils.notify("Cambios guardados");
+        } else {
+            // CREAR
+            cleanData.createdAt = new Date().toISOString();
+            addData('members', cleanData);
+            Utils.notify("Miembro registrado");
         }
+        setIsEditing(false);
     };
 
-    const filteredMembers = useMemo(() => {
+    // Filtro de Búsqueda
+    const filteredMembers = (members || []).filter(m => {
         const term = searchTerm.toLowerCase();
-        return members.filter(m => {
-            const name = m.name || '';
-            const role = m.role || '';
-            const area = m.area || '';
-            return name.toLowerCase().includes(term) || role.toLowerCase().includes(term) || area.toLowerCase().includes(term);
-        });
-    }, [members, searchTerm]);
+        const name = (m.name || '').toLowerCase();
+        const role = (m.role || '').toLowerCase();
+        return name.includes(term) || role.includes(term);
+    });
 
-    // 6. PDF GENERATOR (USANDO ELEMENTO OCULTO PARA QUE NO SALGA BLANCO)
+    // 5. GENERADOR PDF (Usando referencia oculta plana)
     const downloadPDF = async () => {
         if (!selectedMember || !printRef.current) return;
         setIsDownloading(true);
 
+        // Pequeño delay para asegurar que el DOM oculto se renderice
         setTimeout(async () => {
             try {
-                if (!window.html2pdf) {
-                    await new Promise((resolve) => {
-                        const script = document.createElement('script');
-                        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-                        script.onload = resolve;
-                        document.head.appendChild(script);
-                    });
-                }
-                
                 const element = printRef.current;
-                element.style.display = 'block'; // Mostrar solo para la foto
+                element.style.display = 'block'; // Mostrar temporalmente
                 
                 const opt = {
                     margin: 0,
                     filename: `Credencial_${selectedMember.name.replace(/\s+/g,'_')}.pdf`,
                     image: { type: 'jpeg', quality: 1 },
-                    html2canvas: { 
-                        scale: 4, 
-                        useCORS: true, 
-                        logging: false,
-                        allowTaint: true 
-                    },
-                    jsPDF: { unit: 'mm', format: [54, 86], orientation: 'portrait' } 
+                    html2canvas: { scale: 4, useCORS: true, logging: false, backgroundColor: '#0f172a' },
+                    jsPDF: { unit: 'mm', format: [54, 86], orientation: 'portrait' } // Tamaño CR80 exacto
                 };
                 
                 await window.html2pdf().set(opt).from(element).save();
-                element.style.display = 'none'; // Ocultar
-                Utils.notify("PDF Descargado");
+                
+                element.style.display = 'none'; // Ocultar de nuevo
+                Utils.notify("Credencial descargada");
             } catch (error) { 
                 console.error(error); 
-                Utils.notify("Error PDF (Posible bloqueo de imagen)", 'error'); 
+                Utils.notify("Error al generar PDF", 'error'); 
             }
             setIsDownloading(false);
         }, 500);
     };
 
-    // --- TARJETA VISUAL (DISEÑO SOLICITADO) ---
+    // --- TARJETA REUTILIZABLE (Componente Visual) ---
+    // Este componente dibuja la credencial. Se usa para verla en pantalla (3D) y para imprimirla (Plana)
     const CardContent = ({ m, isFront }) => {
         if (!m) return null;
         
-        const id = m.credentialId || 'CDS-0000';
+        const id = m.credentialId || generateCustomID(m.name); // Fallback si es viejo
         const name = m.name || 'Sin Nombre';
         const nameParts = name.split(' ');
         const firstName = nameParts[0];
         const lastName = nameParts.slice(1).join(' ');
         
         const role = m.role || 'Miembro';
-        const area = m.area || 'General';
+        const ministry = m.ministry || 'General';
         const photo = getPhoto(m.photo, name);
         const expirationYear = new Date().getFullYear();
-        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${m.id}`;
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${m.id}`; // QR apunta al ID real de Firebase
         
-        // Color Azul Oscuro Profundo
+        // Color Azul Oscuro Profundo (Tu "Dark Blue")
         const DARK_BG = "bg-[#0f172a]"; 
 
         if (isFront) {
             return (
-                <div className="w-full h-full bg-white relative overflow-hidden flex flex-col items-center select-none">
+                <div className="w-full h-full bg-white relative overflow-hidden flex flex-col items-center select-none font-sans">
                     
-                    {/* --- PARTE SUPERIOR (BLANCA) --- */}
-                    <div className="w-full h-[55%] bg-white relative pt-6 text-center z-10">
+                    {/* PARTE SUPERIOR (BLANCA) */}
+                    <div className="w-full h-[50%] bg-white relative pt-6 text-center z-10">
                         {/* Header */}
-                        <div className="flex flex-col items-center mb-1">
-                            <div className="h-1 w-8 bg-slate-200 rounded-full mb-2"></div>
-                            <p className="text-[9px] font-black text-slate-400 tracking-[0.25em] uppercase">CONQUISTADORES</p>
-                            <h2 className="text-base font-bold text-blue-600 uppercase tracking-wider mt-0.5">Credencial Digital</h2>
-                            <p className="text-[10px] font-bold text-slate-800">{expirationYear}</p>
+                        <div className="flex flex-col items-center">
+                            <div className="h-1 w-8 bg-slate-200 rounded-full mb-1"></div>
+                            <p className="text-[8px] font-black text-slate-400 tracking-[0.25em] uppercase">CONQUISTADORES</p>
+                            <h2 className="text-sm font-bold text-blue-600 uppercase tracking-wider">Credencial Digital</h2>
+                            <p className="text-[9px] font-bold text-slate-800">{expirationYear}</p>
                         </div>
 
-                        {/* Foto Circular (Superpuesta en el borde) */}
-                        <div className="absolute left-1/2 -translate-x-1/2 -bottom-[65px] z-20">
-                            <div className="w-[140px] h-[140px] rounded-full p-1.5 bg-white shadow-xl shadow-slate-400/20">
+                        {/* Foto Circular Grande (Superpuesta en el borde) */}
+                        <div className="absolute left-1/2 -translate-x-1/2 -bottom-[60px] z-20">
+                            <div className="w-[120px] h-[120px] rounded-full p-1 bg-white shadow-xl">
                                 <img src={photo} className="w-full h-full object-cover rounded-full bg-slate-100" alt={name} crossOrigin="anonymous"/>
                             </div>
                         </div>
                     </div>
 
-                    {/* --- PARTE INFERIOR (AZUL OSCURO) --- */}
-                    <div className={`w-full h-[45%] ${DARK_BG} relative flex flex-col items-center justify-end pb-5 px-6 z-0`}>
-                        {/* Curva de Unión */}
-                        <div className="absolute top-[-1px] left-0 w-full h-12 bg-[#0f172a] rounded-t-[50%] scale-x-150 -translate-y-1 z-0"></div>
+                    {/* PARTE INFERIOR (AZUL OSCURO - MISMO TONO QUE DORSO) */}
+                    <div className={`w-full h-[50%] ${DARK_BG} relative flex flex-col items-center justify-end pb-4 px-5 z-0`}>
+                        {/* Curva de Unión (Efecto visual) */}
+                        <div className={`absolute top-[-1px] left-0 w-full h-12 ${DARK_BG} rounded-t-[50%] scale-x-150 -translate-y-1/2 z-0`}></div>
 
                         {/* Datos Texto */}
-                        <div className="relative z-10 text-center mt-10 mb-auto">
-                            <h1 className="text-2xl font-bold text-white leading-none mb-1 drop-shadow-md">{firstName}</h1>
-                            <h2 className="text-xl font-bold text-blue-400 leading-tight mb-2 drop-shadow-md">{lastName}</h2>
-                            <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest border border-slate-600 px-3 py-1 rounded-full">{role} - {area}</span>
+                        <div className="relative z-10 text-center mt-12 mb-auto">
+                            <h1 className="text-xl font-black text-white leading-none mb-1 drop-shadow-md">{firstName}</h1>
+                            <h2 className="text-lg font-bold text-blue-400 leading-tight mb-2 drop-shadow-md">{lastName}</h2>
+                            <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest border border-slate-600 px-3 py-1 rounded-full">{role}</span>
                         </div>
 
                         {/* Footer ID y QR */}
-                        <div className="relative z-10 w-full bg-white/5 rounded-xl p-2 border border-white/10 flex items-center justify-between backdrop-blur-sm">
+                        <div className="relative z-10 w-full bg-white/10 rounded-xl p-2 border border-white/5 flex items-center justify-between backdrop-blur-sm">
                             <div className="text-left pl-1">
                                 <p className="text-[7px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">ID ÚNICO</p>
-                                <p className="text-xs font-mono font-bold text-white tracking-widest">{id}</p>
+                                <p className="text-[10px] font-mono font-bold text-white tracking-widest uppercase">{id}</p>
                                 <p className="text-[7px] font-bold text-blue-400 uppercase mt-0.5 tracking-wider">CDS MI CASA</p>
                             </div>
                             <div className="bg-white p-1 rounded-md">
@@ -280,35 +245,35 @@ window.Views.Directory = ({ userProfile }) => {
             );
         }
 
-        // DORSO
+        // DORSO (AZUL OSCURO SÓLIDO)
         return (
-            <div className={`w-full h-full ${DARK_BG} relative overflow-hidden flex flex-col p-6`}>
-                {/* FONDO SOLIDO DE SEGURIDAD */}
+            <div className={`w-full h-full ${DARK_BG} relative overflow-hidden flex flex-col p-6 font-sans`}>
+                {/* Fondo Sólido de Seguridad */}
                 <div className={`absolute inset-0 ${DARK_BG} z-0`}></div>
                 
                 <div className="relative z-10 text-center mb-4 mt-2">
-                    <div className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-2 text-blue-400 border border-white/10">
-                        <Icon name="User" size={24}/>
+                    <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-2 text-blue-400 border border-white/10">
+                        <Icon name="User" size={20}/>
                     </div>
                     <h3 className="font-bold text-white text-base tracking-wide">Datos de Contacto</h3>
                 </div>
 
                 <div className="relative z-10 flex-1 space-y-3">
                     {/* Botones */}
-                    <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(m.phone)}} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg border border-emerald-500/30">
-                        <Icon name="MessageCircle" size={16} /> Enviar WhatsApp
+                    <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(m.phone)}} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg border border-emerald-500/30">
+                        <Icon name="MessageCircle" size={14} /> Enviar WhatsApp
                     </button>
                     
                     <div className="grid grid-cols-2 gap-3">
-                        <button onClick={(e)=>{e.stopPropagation(); makeCall(m.phone)}} className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2">
+                        <button onClick={(e)=>{e.stopPropagation(); makeCall(m.phone)}} className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 py-2 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2">
                             <Icon name="Phone" size={14} /> Llamar
                         </button>
-                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp('5491136278857', `Hola, soy ${name}, quiero agendar una visita pastoral.`)}} className="bg-slate-700/50 hover:bg-slate-700 text-slate-300 border border-slate-600 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2">
+                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp('5491136278857', `Hola, soy ${name}, quiero agendar una visita pastoral.`)}} className="bg-slate-700/50 hover:bg-slate-700 text-slate-300 border border-slate-600 py-2 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2">
                             <Icon name="Calendar" size={14} /> Agendar Visita
                         </button>
                     </div>
 
-                    <div className="bg-slate-800/50 p-3 rounded-xl border border-white/5 space-y-2 mt-1">
+                    <div className="bg-slate-800/50 p-3 rounded-xl border border-white/5 space-y-2 mt-2">
                         <div>
                             <p className="text-[8px] text-slate-500 uppercase font-bold mb-0.5">Teléfono</p>
                             <p className="text-sm text-slate-200 font-mono">{m.phone || 'No registrado'}</p>
@@ -343,21 +308,19 @@ window.Views.Directory = ({ userProfile }) => {
             <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="flex items-center gap-3">
                     <h2 className="text-2xl font-extrabold text-slate-800">Directorio</h2>
-                    <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded-full">{members.length}</span>
+                    <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded-full">{members ? members.length : 0}</span>
                 </div>
                 <div className="flex gap-2 w-full md:w-auto">
                     <div className="relative flex-1 md:w-64">
                         <Icon name="Search" size={16} className="absolute left-3 top-3 text-slate-400"/>
                         <input className="w-full bg-white border border-slate-200 rounded-xl py-2.5 pl-9 pr-4 text-xs font-bold outline-none focus:ring-2 focus:ring-brand-500" placeholder="Buscar..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
                     </div>
-                    <Button icon="UserPlus" onClick={handleNew}>Nuevo</Button>
+                    <Button icon="Plus" onClick={handleNew}>Nuevo</Button>
                 </div>
             </div>
 
-            {loading && <div className="text-center py-10 text-slate-400">Cargando base de datos...</div>}
-
             {/* Grid */}
-            {!loading && filteredMembers.length > 0 ? (
+            {filteredMembers.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                     {filteredMembers.map(member => {
                         const photo = getPhoto(member.photo, member.name);
@@ -378,30 +341,30 @@ window.Views.Directory = ({ userProfile }) => {
                         );
                     })}
                 </div>
-            ) : (!loading &&
+            ) : (
                 <div className="text-center py-12 text-slate-400">
                     <Icon name="Users" size={32} className="mx-auto mb-2 opacity-20"/>
-                    <p className="text-sm">No se encontraron miembros.</p>
+                    <p className="text-sm">No hay miembros.</p>
                 </div>
             )}
 
             {/* Modal CREAR / EDITAR */}
-            <Modal isOpen={isEditing} onClose={()=>setIsEditing(false)} title={formId ? "Editar Miembro" : "Nuevo Miembro"}>
+            <Modal isOpen={isEditing} onClose={()=>setIsEditing(false)} title={form.id ? "Editar Miembro" : "Nuevo Miembro"}>
                 <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
-                    <Input label="Link Foto (URL o Drive)" value={form.photo} onChange={e=>setForm({...form, photo:e.target.value})} placeholder="https://..." />
+                    <Input label="Link Foto (Drive o URL)" value={form.photo} onChange={e=>setForm({...form, photo:e.target.value})} placeholder="https://..." />
                     <div className="grid grid-cols-2 gap-3">
                         <Input label="Nombre Completo" value={form.name} onChange={e=>setForm({...form, name:e.target.value})} />
                         <div className="space-y-1">
                             <label className="text-xs font-bold text-slate-500 uppercase">Rol / Cargo</label>
-                            <select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-brand-500" value={form.role} onChange={e=>setForm({...form, role:e.target.value})}>
+                            <Select value={form.role} onChange={e=>setForm({...form, role:e.target.value})}>
                                 <option>Miembro</option><option>Líder</option><option>Pastor</option><option>Músico</option><option>Maestro</option><option>Diácono</option><option>Servidor</option>
-                            </select>
+                            </Select>
                         </div>
                     </div>
-                    <Input label="Área / Ministerio" value={form.area} onChange={e=>setForm({...form, area:e.target.value})} placeholder="Ej: Alabanza, Jóvenes, Niños" />
+                    <Input label="Área / Ministerio" value={form.ministry} onChange={e=>setForm({...form, ministry:e.target.value})} placeholder="Ej: Alabanza, Jóvenes..." />
                     
                     <div className="grid grid-cols-2 gap-3">
-                        <Input label="Teléfono" value={form.phone} onChange={e=>setForm({...form, phone:e.target.value})} placeholder="Ej: 54911..." />
+                        <Input label="Teléfono" value={form.phone} onChange={e=>setForm({...form, phone:e.target.value})} placeholder="54911..." />
                         <Input label="Email" type="email" value={form.email} onChange={e=>setForm({...form, email:e.target.value})} />
                     </div>
                     <Input label="Dirección" value={form.address} onChange={e=>setForm({...form, address:e.target.value})} />
@@ -441,7 +404,7 @@ window.Views.Directory = ({ userProfile }) => {
                                 {/* Frente */}
                                 <div className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden bg-white border border-slate-200">
                                     <CardContent m={selectedMember} isFront={true} />
-                                    <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-white/50 flex items-center gap-1 z-50 bg-black/20 px-2 py-0.5 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
+                                    <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-slate-400 flex items-center gap-1 z-50 bg-white/20 px-2 py-0.5 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
                                 </div>
                                 
                                 {/* Dorso */}
@@ -457,7 +420,7 @@ window.Views.Directory = ({ userProfile }) => {
                             </button>
                             <button onClick={downloadPDF} disabled={isDownloading} className="bg-blue-600 text-white px-5 py-2.5 rounded-full font-bold shadow-lg hover:bg-blue-500 text-xs flex items-center gap-2 disabled:opacity-50">
                                 {isDownloading ? <Icon name="Loader" className="animate-spin" size={14}/> : <Icon name="Download" size={14}/>}
-                                {isDownloading ? 'Generando...' : 'Descargar PDF (Solo Frente)'}
+                                {isDownloading ? 'Generando...' : 'Descargar Credencial'}
                             </button>
                         </div>
                     </div>
@@ -471,7 +434,7 @@ window.Views.Directory = ({ userProfile }) => {
                 .rotate-y-180 { transform: rotateY(180deg); }
                 .custom-scrollbar::-webkit-scrollbar { width: 3px; }
                 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-            `}</style>
+            }</style>
         </div>
     );
 };
