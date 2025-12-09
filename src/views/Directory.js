@@ -1,4 +1,3 @@
-// src/views/Directory.js
 window.Views = window.Views || {};
 
 window.Views.Directory = ({ members, directory, addData, updateData, deleteData }) => {
@@ -23,7 +22,7 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
     
     const initialForm = { 
         id: '', name: '', role: 'Miembro', email: '', phone: '', 
-        address: '', birthDate: '', emergencyContact: '', emergencyPhone: '', photo: '' 
+        address: '', birthDate: '', emergencyContact: '', emergencyPhone: '', photo: '', joinedDate: '' 
     };
     const [form, setForm] = useState(initialForm);
 
@@ -48,7 +47,7 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
     const formatDate = (dateString) => {
         if (!dateString) return '-';
         const date = new Date(dateString);
-        return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        return date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }).toUpperCase();
     };
 
     const getPhoto = (photoUrl, name) => {
@@ -85,13 +84,14 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
             birthDate: getField(member, 'birthDate', 'fechaNacimiento') || '',
             emergencyContact: getField(member, 'emergencyContact', 'contactoEmergencia') || '',
             emergencyPhone: getField(member, 'emergencyPhone', 'telefonoEmergencia') || '',
-            photo: getField(member, 'photo', 'foto') || ''
+            photo: getField(member, 'photo', 'foto') || '',
+            joinedDate: getField(member, 'joinedDate', 'fechaIngreso') || ''
         });
         setIsEditing(true);
     };
 
     const handleNew = () => {
-        setForm({ ...initialForm, id: Date.now().toString(36) });
+        setForm({ ...initialForm, id: Date.now().toString(36), joinedDate: new Date().toISOString().split('T')[0] });
         setIsEditing(true);
     };
 
@@ -135,7 +135,7 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
     const downloadPDF = async () => {
         if (!selectedMember || !cardRef.current) return;
         setIsDownloading(true);
-        setIsFlipped(false);
+        setIsFlipped(false); // Forzamos mostrar el frente
 
         setTimeout(async () => {
             try {
@@ -147,11 +147,12 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                         document.head.appendChild(script);
                     });
                 }
+                // Configuración mejorada para evitar cortes
                 const opt = {
                     margin: 0,
-                    filename: `Credencial_${selectedMember.name}.pdf`,
-                    image: { type: 'jpeg', quality: 0.98 },
-                    html2canvas: { scale: 2, useCORS: true, logging: false, scrollY: 0 },
+                    filename: `Credencial_${selectedMember.name.replace(/\s+/g,'_')}.pdf`,
+                    image: { type: 'jpeg', quality: 1 },
+                    html2canvas: { scale: 3, useCORS: true, logging: false },
                     jsPDF: { unit: 'mm', format: [55, 88], orientation: 'portrait' } 
                 };
                 await window.html2pdf().set(opt).from(cardRef.current).save();
@@ -171,6 +172,9 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
         const birthDateStr = getField(m, 'birthDate', 'fechaNacimiento');
         const age = calculateAge(birthDateStr);
         const birthDateFormatted = formatDate(birthDateStr);
+        const joinedDateStr = getField(m, 'joinedDate', 'fechaIngreso');
+        const joinedYear = joinedDateStr ? new Date(joinedDateStr).getFullYear() : new Date().getFullYear();
+        
         const email = getField(m, 'email', 'correo');
         const phone = getField(m, 'phone', 'telefono');
         const address = getField(m, 'address', 'direccion');
@@ -184,67 +188,76 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
             <div className="perspective-1000 w-[320px] h-[520px] cursor-pointer group select-none relative" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
                 <div className={`relative w-full h-full duration-700 transform-style-3d transition-all ${isFlipped ? 'rotate-y-180' : ''}`}>
                     
-                    {/* --- FRENTE (CORREGIDO Y COMPLETO) --- */}
-                    <div ref={!isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 flex flex-col items-center pt-8 pb-4 px-6 z-20">
+                    {/* --- FRENTE (REDISENADO PARA ESTAR LLENO) --- */}
+                    <div ref={!isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 flex flex-col items-center z-20">
                         
-                        {/* Decoración */}
-                        <div className="absolute top-4 w-12 h-3 bg-slate-200 rounded-full mx-auto left-0 right-0 shadow-inner"></div>
-                        <div className="absolute -top-10 -right-10 w-40 h-40 bg-brand-50 rounded-full blur-3xl opacity-60"></div>
-                        <div className="absolute top-20 -left-10 w-20 h-20 bg-indigo-50 rounded-full blur-2xl opacity-60"></div>
-
-                        {/* Encabezado */}
-                        <div className="text-center mb-6 z-10">
-                            <h3 className="text-[10px] font-black tracking-[0.25em] text-slate-400 uppercase">CONQUISTADORES</h3>
-                            <div className="h-1 w-8 bg-brand-500 mx-auto mt-2 rounded-full"></div>
+                        {/* 1. Header Decorativo */}
+                        <div className="w-full h-32 bg-gradient-to-b from-slate-50 to-white relative">
+                            {/* Logo top */}
+                            <div className="absolute top-6 left-0 right-0 text-center">
+                                <h3 className="text-[10px] font-black tracking-[0.3em] text-slate-400 uppercase">CONQUISTADORES</h3>
+                                <div className="h-1 w-6 bg-brand-500 mx-auto mt-2 rounded-full"></div>
+                            </div>
+                            {/* Decoración agujero */}
+                            <div className="absolute top-3 w-12 h-3 bg-slate-200 rounded-full mx-auto left-0 right-0 shadow-inner"></div>
+                            {/* Círculos decorativos fondo */}
+                            <div className="absolute top-[-20px] left-[-20px] w-32 h-32 bg-brand-500/5 rounded-full blur-2xl"></div>
+                            <div className="absolute top-[20px] right-[-20px] w-24 h-24 bg-indigo-500/5 rounded-full blur-2xl"></div>
                         </div>
 
-                        {/* Foto */}
-                        <div className="relative w-36 h-36 mb-4">
-                            <div className="absolute inset-0 bg-gradient-to-tr from-brand-400 to-indigo-500 rounded-full blur-sm opacity-40 animate-pulse"></div>
-                            <div className="relative w-full h-full rounded-full p-1 bg-gradient-to-tr from-brand-400 to-indigo-500 shadow-xl">
-                                <img src={photo} className="w-full h-full object-cover rounded-full bg-white border-2 border-white" alt={name} onError={(e) => e.target.src = getPhoto(null, name)}/>
+                        {/* 2. Foto Principal (Superpuesta) */}
+                        <div className="-mt-16 mb-3 relative">
+                            <div className="w-32 h-32 rounded-full p-1 bg-white shadow-xl relative z-10">
+                                <img src={photo} className="w-full h-full object-cover rounded-full bg-slate-100 border border-slate-100" alt={name} onError={(e) => e.target.src = getPhoto(null, name)}/>
+                            </div>
+                            {/* Badge de Rol Flotante */}
+                            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 z-20 bg-brand-600 text-white px-4 py-1 rounded-full shadow-lg border-2 border-white">
+                                <span className="text-[10px] font-bold uppercase tracking-wider whitespace-nowrap">{role}</span>
                             </div>
                         </div>
 
-                        {/* Info Principal */}
-                        <div className="text-center space-y-1 mb-4 w-full z-10 flex-1">
-                            <h2 className="text-2xl font-extrabold text-slate-800 leading-tight px-1 truncate">{name}</h2>
-                            <span className="inline-block px-4 py-1 bg-brand-50 text-brand-700 text-[10px] font-bold rounded-full uppercase tracking-wider border border-brand-100 shadow-sm mb-3">
-                                {role}
-                            </span>
+                        {/* 3. Nombre y Datos */}
+                        <div className="text-center w-full px-6 flex-1 flex flex-col items-center">
+                            <h2 className="text-2xl font-extrabold text-slate-800 leading-tight mb-4 mt-2">{name}</h2>
                             
-                            {/* Datos Clave (Edad y Nacimiento) */}
-                            <div className="flex items-center justify-center gap-4 text-xs text-slate-500 border-t border-slate-100 pt-3 w-4/5 mx-auto">
-                                {age && (
-                                    <div className="text-center">
-                                        <p className="font-bold text-slate-700 text-base">{age}</p>
-                                        <p className="text-[9px] uppercase font-bold tracking-wider">Años</p>
-                                    </div>
-                                )}
-                                {birthDateFormatted !== '-' && (
-                                    <div className="text-center border-l border-slate-200 pl-4">
-                                        <p className="font-bold text-slate-700 text-sm">{birthDateFormatted}</p>
-                                        <p className="text-[9px] uppercase font-bold tracking-wider">Nacimiento</p>
-                                    </div>
-                                )}
+                            {/* Grilla de Datos Personales (Lo que pediste para llenar) */}
+                            <div className="grid grid-cols-3 gap-2 w-full mb-6">
+                                <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center">
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase">Edad</span>
+                                    <span className="text-sm font-bold text-slate-700">{age || '-'}</span>
+                                </div>
+                                <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center">
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase">Cumple</span>
+                                    <span className="text-sm font-bold text-slate-700">{birthDateFormatted}</span>
+                                </div>
+                                <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center">
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase">Desde</span>
+                                    <span className="text-sm font-bold text-slate-700">{joinedYear}</span>
+                                </div>
                             </div>
                         </div>
 
-                        {/* Footer */}
-                        <div className="mt-auto w-full bg-slate-50 p-3 rounded-2xl border border-slate-200 flex items-center justify-between gap-3 z-10">
-                            <div className="text-left overflow-hidden">
-                                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">ID Miembro</p>
-                                <p className="text-sm font-mono font-black text-slate-700 truncate">{id}</p>
+                        {/* 4. Footer Importante (QR y Vencimiento) */}
+                        <div className="w-full bg-slate-50 p-5 border-t border-slate-200 flex items-center justify-between mt-auto">
+                            <div>
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wide mb-1">VENCIMIENTO</p>
+                                <p className="text-lg font-black text-brand-600 leading-none">DIC {expirationYear}</p>
+                                <p className="text-[9px] font-mono text-slate-400 mt-1">ID: {id}</p>
                             </div>
-                            <div className="shrink-0 bg-white p-1 rounded-lg border border-slate-100 shadow-sm">
-                                <img src={qrUrl} className="w-12 h-12 mix-blend-multiply opacity-90" alt="QR" />
+                            <div className="bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm">
+                                <img src={qrUrl} className="w-14 h-14 mix-blend-multiply opacity-90" alt="QR" />
                             </div>
                         </div>
-                        <div className="absolute bottom-1.5 text-[9px] text-slate-300 flex items-center gap-1"><Icon name="RotateCw" size={10} /></div>
+                        
+                        <div className="absolute bottom-1.5 text-[9px] text-slate-300 flex items-center gap-1 bg-white/80 px-2 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
                     </div>
 
-                    {/* --- DORSO (CORREGIDO Y FUNCIONAL) --- */}
-                    <div ref={isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden rotate-y-180 bg-slate-800 text-white rounded-3xl shadow-2xl overflow-hidden flex flex-col p-6 relative border border-slate-700 z-20">
+                    {/* --- DORSO (CONSERVADO + FIX TRANSPARENCIA) --- */}
+                    {/* Agregado bg-slate-900 explícito y z-index para asegurar que no sea transparente */}
+                    <div ref={isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden rotate-y-180 bg-slate-900 text-white rounded-3xl shadow-2xl overflow-hidden flex flex-col p-6 relative border border-slate-700 z-20">
+                         {/* Capa extra para asegurar opacidad */}
+                         <div className="absolute inset-0 bg-slate-900 -z-10"></div>
+                         
                          <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-brand-600 rounded-full blur-[80px] opacity-20 pointer-events-none"></div>
                          <div className="absolute top-4 w-12 h-3 bg-slate-700 rounded-full mx-auto left-0 right-0 shadow-inner"></div>
 
@@ -257,28 +270,26 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
 
                          <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-4 z-10">
                             
-                            {/* Botones de Acción Rápida */}
+                            {/* Botones Acción */}
                             <div className="grid grid-cols-2 gap-3 mb-2">
-                                <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(phone)}} className="bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition-all shadow-lg shadow-emerald-500/20 active:scale-95">
+                                <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(phone)}} className="bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition-all shadow-lg shadow-emerald-900/20 border border-emerald-500/30">
                                     <Icon name="MessageCircle" size={14} /> WhatsApp
                                 </button>
-                                <button onClick={(e)=>{e.stopPropagation(); makeCall(phone)}} className="bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition-all shadow-lg shadow-blue-500/20 active:scale-95">
+                                <button onClick={(e)=>{e.stopPropagation(); makeCall(phone)}} className="bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition-all shadow-lg shadow-blue-900/20 border border-blue-500/30">
                                     <Icon name="Phone" size={14} /> Llamar
                                 </button>
                             </div>
 
-                            {/* Datos Detallados */}
+                            {/* Datos */}
                             <div className="bg-white/5 p-3 rounded-xl border border-white/5 space-y-3">
                                 <div>
                                     <p className="text-[9px] text-slate-400 uppercase flex items-center gap-1"><Icon name="Phone" size={10}/> Teléfono</p>
                                     <p className="text-sm font-medium text-white mt-0.5 font-mono">{phone || 'No registrado'}</p>
                                 </div>
-                                
                                 <div onClick={(e)=>{e.stopPropagation(); openMaps(address)}} className={`cursor-pointer hover:opacity-80 ${!address && 'pointer-events-none'}`}>
                                     <p className="text-[9px] text-slate-400 uppercase flex items-center gap-1"><Icon name="MapPin" size={10}/> Dirección</p>
                                     <p className={`text-xs font-medium mt-0.5 leading-tight ${address ? 'text-blue-300 underline decoration-blue-300/50' : 'text-slate-500'}`}>{address || 'Sin dirección'}</p>
                                 </div>
-                                
                                 <div>
                                     <p className="text-[9px] text-slate-400 uppercase flex items-center gap-1"><Icon name="Mail" size={10}/> Email</p>
                                     <p className="text-xs font-medium text-slate-200 break-all mt-0.5">{email || '-'}</p>
@@ -296,16 +307,9 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                                 </div>
                             )}
 
-                            {/* Botón Agendar Visita (Placeholder) */}
-                            <button 
-                                onClick={(e) => { e.stopPropagation(); Utils.notify('Función Visita: Próximamente'); }}
-                                className="w-full bg-brand-600 hover:bg-brand-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95 mt-2"
-                            >
+                            <button onClick={(e) => { e.stopPropagation(); Utils.notify('Función Visita: Próximamente'); }} className="w-full bg-brand-600 hover:bg-brand-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg mt-2">
                                 <Icon name="Calendar" size={14} /> Agendar Visita
                             </button>
-                         </div>
-                         <div className="mt-3 pt-3 border-t border-white/5 text-center">
-                             <p className="text-[9px] text-slate-500">Documento interno. Vence: DIC {expirationYear}</p>
                          </div>
                     </div>
                 </div>
@@ -325,12 +329,7 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                 <div className="flex gap-2 w-full md:w-auto">
                     <div className="relative flex-1 md:w-64">
                         <Icon name="Search" size={16} className="absolute left-3 top-3 text-slate-400"/>
-                        <input 
-                            className="w-full bg-white border border-slate-200 rounded-xl py-2.5 pl-9 pr-4 text-xs font-bold outline-none focus:ring-2 focus:ring-brand-500" 
-                            placeholder="Buscar miembro..." 
-                            value={searchTerm} 
-                            onChange={e=>setSearchTerm(e.target.value)} 
-                        />
+                        <input className="w-full bg-white border border-slate-200 rounded-xl py-2.5 pl-9 pr-4 text-xs font-bold outline-none focus:ring-2 focus:ring-brand-500" placeholder="Buscar miembro..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
                     </div>
                     <Button icon="UserPlus" onClick={handleNew}>Nuevo</Button>
                 </div>
@@ -343,12 +342,8 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                         const name = getField(member, 'name', 'nombre') || 'Sin nombre';
                         const role = getField(member, 'role', 'rol') || 'Miembro';
                         const photo = getPhoto(getField(member, 'photo', 'foto'), name);
-                        
                         return (
-                            <div 
-                                key={member.id} 
-                                className="group bg-white p-3 rounded-2xl shadow-sm border border-slate-100 hover:shadow-lg transition-all flex items-center gap-3 relative"
-                            >
+                            <div key={member.id} className="group bg-white p-3 rounded-2xl shadow-sm border border-slate-100 hover:shadow-lg transition-all flex items-center gap-3 relative">
                                 <div className="flex-1 flex items-center gap-3 cursor-pointer" onClick={() => { setSelectedMember(member); setIsFlipped(false); }}>
                                     <img src={photo} className="w-12 h-12 rounded-xl object-cover bg-slate-100" alt={name}/>
                                     <div className="flex-1 min-w-0">
@@ -356,7 +351,6 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                                         <p className="text-[10px] text-slate-500 font-bold uppercase truncate">{role}</p>
                                     </div>
                                 </div>
-                                
                                 <div className="flex flex-col gap-1 border-l border-slate-100 pl-2">
                                     <button onClick={()=>handleEdit(member)} className="text-slate-400 hover:text-brand-600 p-1"><Icon name="Edit" size={14}/></button>
                                     <button onClick={()=>handleDelete(member.id)} className="text-slate-400 hover:text-red-600 p-1"><Icon name="Trash" size={14}/></button>
@@ -384,39 +378,32 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                         </div>
                     </div>
                     
-                    <Input label="URL Foto (Opcional)" value={form.photo} onChange={e=>setForm({...form, photo:e.target.value})} placeholder="https://..." />
-
+                    <Input label="URL Foto" value={form.photo} onChange={e=>setForm({...form, photo:e.target.value})} placeholder="https://..." />
                     <div className="grid grid-cols-2 gap-3">
-                        <Input label="Nombre Completo" value={form.name} onChange={e=>setForm({...form, name:e.target.value})} />
+                        <Input label="Nombre" value={form.name} onChange={e=>setForm({...form, name:e.target.value})} />
                         <div className="space-y-1">
                             <label className="text-xs font-bold text-slate-500 uppercase">Rol</label>
                             <select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-brand-500" value={form.role} onChange={e=>setForm({...form, role:e.target.value})}>
-                                <option>Miembro</option>
-                                <option>Líder</option>
-                                <option>Pastor</option>
-                                <option>Músico</option>
-                                <option>Maestro</option>
-                                <option>Diácono</option>
+                                <option>Miembro</option><option>Líder</option><option>Pastor</option><option>Músico</option><option>Maestro</option>
                             </select>
                         </div>
                     </div>
-
                     <div className="grid grid-cols-2 gap-3">
-                        <Input type="date" label="Fecha Nacimiento" value={form.birthDate} onChange={e=>setForm({...form, birthDate:e.target.value})} />
-                        <Input label="Teléfono / WhatsApp" value={form.phone} onChange={e=>setForm({...form, phone:e.target.value})} placeholder="Ej: 54911..." />
+                        <Input type="date" label="Nacimiento" value={form.birthDate} onChange={e=>setForm({...form, birthDate:e.target.value})} />
+                        <Input type="date" label="Fecha Ingreso" value={form.joinedDate} onChange={e=>setForm({...form, joinedDate:e.target.value})} />
                     </div>
-
-                    <Input label="Email" type="email" value={form.email} onChange={e=>setForm({...form, email:e.target.value})} />
-                    <Input label="Dirección Completa" value={form.address} onChange={e=>setForm({...form, address:e.target.value})} placeholder="Calle 123, Ciudad" />
-
+                    <div className="grid grid-cols-2 gap-3">
+                        <Input label="Teléfono" value={form.phone} onChange={e=>setForm({...form, phone:e.target.value})} placeholder="549..." />
+                        <Input label="Email" type="email" value={form.email} onChange={e=>setForm({...form, email:e.target.value})} />
+                    </div>
+                    <Input label="Dirección" value={form.address} onChange={e=>setForm({...form, address:e.target.value})} />
                     <div className="pt-4 border-t border-slate-100">
-                        <p className="text-xs font-bold text-slate-400 uppercase mb-2">Datos de Emergencia (Opcional)</p>
+                        <p className="text-xs font-bold text-slate-400 uppercase mb-2">Emergencia</p>
                         <div className="grid grid-cols-2 gap-3">
-                            <Input label="Nombre Contacto" value={form.emergencyContact} onChange={e=>setForm({...form, emergencyContact:e.target.value})} />
-                            <Input label="Teléfono Emergencia" value={form.emergencyPhone} onChange={e=>setForm({...form, emergencyPhone:e.target.value})} />
+                            <Input label="Contacto" value={form.emergencyContact} onChange={e=>setForm({...form, emergencyContact:e.target.value})} />
+                            <Input label="Teléfono" value={form.emergencyPhone} onChange={e=>setForm({...form, emergencyPhone:e.target.value})} />
                         </div>
                     </div>
-
                     <Button className="w-full mt-4" onClick={handleSave}>Guardar Datos</Button>
                 </div>
             </Modal>
@@ -426,9 +413,7 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm transition-opacity" onClick={() => setSelectedMember(null)}></div>
                     <div className="relative z-10 animate-enter flex flex-col items-center gap-6">
-                        
                         {renderCredential(selectedMember)}
-                        
                         <div className="flex gap-3">
                             <button onClick={() => setSelectedMember(null)} className="bg-white text-slate-800 px-5 py-2.5 rounded-full font-bold shadow-lg hover:bg-slate-50 transition-transform active:scale-95 text-xs flex items-center gap-2">
                                 <Icon name="X" size={14}/> Cerrar
