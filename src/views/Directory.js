@@ -1,7 +1,7 @@
 window.Views = window.Views || {};
 
 window.Views.Directory = ({ userProfile }) => {
-    // 1. HOOKS Y UTILIDADES
+    // 1. HOOKS
     const { useState, useMemo, useRef, useEffect } = React;
     const Utils = window.Utils || {};
     const { Icon, Button, Input, Modal } = Utils;
@@ -10,34 +10,32 @@ window.Views.Directory = ({ userProfile }) => {
     const [members, setMembers] = useState([]);
     const [loading, setLoading] = useState(true);
     
-    // Estados de Interfaz
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedMember, setSelectedMember] = useState(null);
     const [isEditing, setIsEditing] = useState(false);
     const [isFlipped, setIsFlipped] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
     
-    // Formulario Inicial
+    // Formulario
     const initialForm = { 
         name: '', role: 'Miembro', area: 'General', email: '', phone: '', 
         address: '', birthDate: '', emergencyContact: '', emergencyPhone: '', photo: '', joinedDate: '' 
     };
     const [form, setForm] = useState(initialForm);
-    const [formId, setFormId] = useState(null); // ID separado del objeto form
+    const [formId, setFormId] = useState(null);
 
     // Referencias
-    const printRef = useRef(null); // Referencia oculta para PDF HD
+    const printRef = useRef(null); // Referencia oculta para PDF
 
-    // 3. CONEXIÓN DIRECTA A FIREBASE (SOLUCIÓN DE PERSISTENCIA)
+    // 3. CONEXIÓN DIRECTA A FIREBASE (CRUCIAL PARA QUE GUARDE)
     useEffect(() => {
-        // Verificar si existe la conexión
         if (!window.db) {
-            console.error("No se encontró window.db. Asegúrate de que Firebase esté inicializado en index.html");
+            console.error("Error crítico: No hay conexión a Firebase (window.db es undefined).");
             setLoading(false);
             return;
         }
 
-        // Suscripción en tiempo real a la colección 'directory'
+        // Escuchar cambios en tiempo real
         const unsubscribe = window.db.collection('directory').onSnapshot(snapshot => {
             const data = snapshot.docs.map(doc => ({
                 id: doc.id,
@@ -46,7 +44,7 @@ window.Views.Directory = ({ userProfile }) => {
             setMembers(data);
             setLoading(false);
         }, error => {
-            console.error("Error leyendo directorio:", error);
+            console.error("Error Firebase:", error);
             Utils.notify("Error de conexión", "error");
             setLoading(false);
         });
@@ -57,8 +55,8 @@ window.Views.Directory = ({ userProfile }) => {
     // 4. HELPERS
     const getPhoto = (photoUrl, name) => {
         if (photoUrl && photoUrl.length > 10) {
-            // Fix para Google Drive
-            if (photoUrl.includes('drive.google.com') || photoUrl.includes('drive.google.com/open')) {
+            // Intento de fix para Google Drive
+            if (photoUrl.includes('drive.google.com')) {
                 const idMatch = photoUrl.match(/[-\w]{25,}/);
                 if (idMatch) return `https://drive.google.com/uc?export=view&id=${idMatch[0]}`;
             }
@@ -75,22 +73,22 @@ window.Views.Directory = ({ userProfile }) => {
     };
 
     const openWhatsApp = (phone, message = '') => {
-        if (!phone) return Utils.notify('Sin número registrado', 'error');
+        if (!phone) return Utils.notify('Sin número', 'error');
         const p = phone.replace(/\D/g, ''); 
         window.open(`https://wa.me/${p}${message ? `?text=${encodeURIComponent(message)}` : ''}`, '_blank');
     };
     
     const makeCall = (phone) => {
-        if (!phone) return Utils.notify('Sin número registrado', 'error');
+        if (!phone) return Utils.notify('Sin número', 'error');
         window.location.href = `tel:${phone.replace(/\D/g, '')}`;
     };
 
     const openMaps = (address) => {
-        if (!address) return Utils.notify('Sin dirección registrada', 'error');
+        if (!address) return Utils.notify('Sin dirección', 'error');
         window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`, '_blank');
     };
 
-    // 5. CRUD DIRECTO A FIREBASE
+    // 5. CRUD DIRECTO (GUARDA SÍ O SÍ)
     const handleEdit = (member) => {
         setForm({
             name: member.name || '',
@@ -116,10 +114,10 @@ window.Views.Directory = ({ userProfile }) => {
     };
 
     const handleDelete = async (id) => {
-        if(!confirm("¿Estás seguro de eliminar a este miembro permanentemente?")) return;
+        if(!confirm("¿Eliminar definitivamente?")) return;
         try {
             await window.db.collection('directory').doc(id).delete();
-            Utils.notify("Miembro eliminado");
+            Utils.notify("Eliminado");
             if (selectedMember?.id === id) setSelectedMember(null);
         } catch (e) {
             console.error(e);
@@ -128,37 +126,35 @@ window.Views.Directory = ({ userProfile }) => {
     };
 
     const handleSave = async () => {
-        if (!form.name) return Utils.notify("El nombre es obligatorio", 'error');
+        if (!form.name) return Utils.notify("Nombre obligatorio", 'error');
         
-        // Limpieza de datos (undefined -> string vacío)
+        // Limpiamos datos undefined
         const cleanData = Object.keys(form).reduce((acc, key) => {
             acc[key] = form[key] === undefined ? '' : form[key];
             return acc;
         }, {});
 
-        // Si es nuevo, generamos ID personalizado o dejamos que Firebase cree uno
-        // Pero para mantener el ID de credencial, lo guardamos como campo 'credentialId'
+        // ID Personalizado
         if (!cleanData.credentialId) {
             cleanData.credentialId = generateCustomID(cleanData.name);
         }
 
         try {
             if (formId) {
-                // EDITAR
+                // UPDATE
                 await window.db.collection('directory').doc(formId).update(cleanData);
-                // Actualizar vista modal si está abierta
                 if(selectedMember && selectedMember.id === formId) setSelectedMember({id: formId, ...cleanData});
-                Utils.notify("Cambios guardados");
+                Utils.notify("Guardado");
             } else {
-                // CREAR
+                // CREATE
                 cleanData.createdAt = new Date().toISOString();
                 await window.db.collection('directory').add(cleanData);
-                Utils.notify("Miembro registrado");
+                Utils.notify("Creado");
             }
             setIsEditing(false);
         } catch (e) {
             console.error("Error guardando:", e);
-            Utils.notify("Error al guardar en base de datos", "error");
+            Utils.notify("Error al guardar. Revisa la consola.", "error");
         }
     };
 
@@ -172,7 +168,7 @@ window.Views.Directory = ({ userProfile }) => {
         });
     }, [members, searchTerm]);
 
-    // 6. PDF GENERATOR (USANDO ELEMENTO OCULTO CR80)
+    // 6. PDF GENERATOR (USANDO ELEMENTO OCULTO PARA QUE NO SALGA BLANCO)
     const downloadPDF = async () => {
         if (!selectedMember || !printRef.current) return;
         setIsDownloading(true);
@@ -189,34 +185,38 @@ window.Views.Directory = ({ userProfile }) => {
                 }
                 
                 const element = printRef.current;
-                element.style.display = 'block'; // Mostrar
+                element.style.display = 'block'; // Mostrar solo para la foto
                 
                 const opt = {
                     margin: 0,
                     filename: `Credencial_${selectedMember.name.replace(/\s+/g,'_')}.pdf`,
                     image: { type: 'jpeg', quality: 1 },
-                    html2canvas: { scale: 4, useCORS: true, logging: false },
+                    html2canvas: { 
+                        scale: 4, 
+                        useCORS: true, 
+                        logging: false,
+                        allowTaint: true 
+                    },
                     jsPDF: { unit: 'mm', format: [54, 86], orientation: 'portrait' } 
                 };
                 
                 await window.html2pdf().set(opt).from(element).save();
                 element.style.display = 'none'; // Ocultar
-                Utils.notify("Credencial descargada");
+                Utils.notify("PDF Descargado");
             } catch (error) { 
                 console.error(error); 
-                Utils.notify("Error al generar PDF", 'error'); 
+                Utils.notify("Error PDF (Posible bloqueo de imagen)", 'error'); 
             }
             setIsDownloading(false);
         }, 500);
     };
 
-    // --- COMPONENTE DE TARJETA (DISEÑO SPLIT BLANCO/AZUL) ---
+    // --- TARJETA VISUAL (DISEÑO SOLICITADO) ---
     const CardContent = ({ m, isFront }) => {
         if (!m) return null;
         
-        const id = m.credentialId || m.id?.slice(0,8).toUpperCase() || '---';
+        const id = m.credentialId || 'CDS-0000';
         const name = m.name || 'Sin Nombre';
-        // Separar nombre para diseño
         const nameParts = name.split(' ');
         const firstName = nameParts[0];
         const lastName = nameParts.slice(1).join(' ');
@@ -227,93 +227,88 @@ window.Views.Directory = ({ userProfile }) => {
         const expirationYear = new Date().getFullYear();
         const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${m.id}`;
         
-        // Color Azul Oscuro (Mismo para atrás y abajo-adelante)
+        // Color Azul Oscuro Profundo
         const DARK_BG = "bg-[#0f172a]"; 
 
         if (isFront) {
             return (
-                <div className="w-full h-full bg-white relative overflow-hidden flex flex-col items-center">
+                <div className="w-full h-full bg-white relative overflow-hidden flex flex-col items-center select-none">
                     
-                    {/* PARTE SUPERIOR BLANCA */}
-                    <div className="w-full h-[55%] bg-white relative pt-8 text-center z-10">
+                    {/* --- PARTE SUPERIOR (BLANCA) --- */}
+                    <div className="w-full h-[55%] bg-white relative pt-6 text-center z-10">
                         {/* Header */}
                         <div className="flex flex-col items-center mb-1">
                             <div className="h-1 w-8 bg-slate-200 rounded-full mb-2"></div>
                             <p className="text-[9px] font-black text-slate-400 tracking-[0.25em] uppercase">CONQUISTADORES</p>
-                            <h2 className="text-base font-bold text-blue-600 uppercase tracking-wider mt-1">Credencial Digital</h2>
+                            <h2 className="text-base font-bold text-blue-600 uppercase tracking-wider mt-0.5">Credencial Digital</h2>
                             <p className="text-[10px] font-bold text-slate-800">{expirationYear}</p>
                         </div>
 
-                        {/* Foto Circular Grande (Superpuesta en el borde) */}
-                        <div className="absolute left-1/2 -translate-x-1/2 -bottom-[60px] z-20">
-                            <div className="w-[140px] h-[140px] rounded-full p-1.5 bg-white shadow-xl">
+                        {/* Foto Circular (Superpuesta en el borde) */}
+                        <div className="absolute left-1/2 -translate-x-1/2 -bottom-[65px] z-20">
+                            <div className="w-[140px] h-[140px] rounded-full p-1.5 bg-white shadow-xl shadow-slate-400/20">
                                 <img src={photo} className="w-full h-full object-cover rounded-full bg-slate-100" alt={name} crossOrigin="anonymous"/>
                             </div>
                         </div>
                     </div>
 
-                    {/* PARTE INFERIOR AZUL OSCURO */}
+                    {/* --- PARTE INFERIOR (AZUL OSCURO) --- */}
                     <div className={`w-full h-[45%] ${DARK_BG} relative flex flex-col items-center justify-end pb-5 px-6 z-0`}>
-                        {/* Forma curva de unión */}
-                        <div className="absolute top-[-1px] left-0 w-full h-10 bg-[#0f172a] rounded-t-[50%] scale-x-150 z-0"></div>
+                        {/* Curva de Unión */}
+                        <div className="absolute top-[-1px] left-0 w-full h-12 bg-[#0f172a] rounded-t-[50%] scale-x-150 -translate-y-1 z-0"></div>
 
                         {/* Datos Texto */}
-                        <div className="relative z-10 text-center mt-12 mb-auto">
-                            <h1 className="text-2xl font-bold text-white leading-none mb-1">{firstName}</h1>
-                            <h2 className="text-xl font-bold text-blue-400 leading-tight mb-2">{lastName}</h2>
-                            <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest border border-slate-600 px-3 py-1 rounded-full">{role}</span>
+                        <div className="relative z-10 text-center mt-10 mb-auto">
+                            <h1 className="text-2xl font-bold text-white leading-none mb-1 drop-shadow-md">{firstName}</h1>
+                            <h2 className="text-xl font-bold text-blue-400 leading-tight mb-2 drop-shadow-md">{lastName}</h2>
+                            <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest border border-slate-600 px-3 py-1 rounded-full">{role} - {area}</span>
                         </div>
 
                         {/* Footer ID y QR */}
-                        <div className="relative z-10 w-full bg-slate-800/50 rounded-xl p-2.5 border border-white/5 flex items-center justify-between">
+                        <div className="relative z-10 w-full bg-white/5 rounded-xl p-2 border border-white/10 flex items-center justify-between backdrop-blur-sm">
                             <div className="text-left pl-1">
                                 <p className="text-[7px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">ID ÚNICO</p>
                                 <p className="text-xs font-mono font-bold text-white tracking-widest">{id}</p>
-                                <p className="text-[7px] font-bold text-blue-400 uppercase mt-0.5">CDS MI CASA</p>
+                                <p className="text-[7px] font-bold text-blue-400 uppercase mt-0.5 tracking-wider">CDS MI CASA</p>
                             </div>
                             <div className="bg-white p-1 rounded-md">
                                 <img src={qrUrl} className="w-10 h-10" alt="QR" crossOrigin="anonymous"/>
                             </div>
                         </div>
-                        
-                        {/* Decoración sutil */}
-                        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-10 h-1 bg-blue-500 rounded-t-full opacity-50"></div>
                     </div>
                 </div>
             );
         }
 
-        // DORSO (AZUL OSCURO SÓLIDO)
+        // DORSO
         return (
             <div className={`w-full h-full ${DARK_BG} relative overflow-hidden flex flex-col p-6`}>
-                {/* Fondo Sólido */}
+                {/* FONDO SOLIDO DE SEGURIDAD */}
                 <div className={`absolute inset-0 ${DARK_BG} z-0`}></div>
                 
-                <div className="relative z-10 text-center mb-6 mt-4">
-                    <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-2 text-blue-400 border border-white/10">
-                        <Icon name="User" size={20}/>
+                <div className="relative z-10 text-center mb-4 mt-2">
+                    <div className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-2 text-blue-400 border border-white/10">
+                        <Icon name="User" size={24}/>
                     </div>
                     <h3 className="font-bold text-white text-base tracking-wide">Datos de Contacto</h3>
                 </div>
 
-                <div className="relative z-10 flex-1 space-y-4">
+                <div className="relative z-10 flex-1 space-y-3">
                     {/* Botones */}
-                    <div className="grid grid-cols-1 gap-3">
-                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(m.phone, `Hola ${name}, te hablo desde la App.`)}} className="bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg border border-emerald-500/30">
-                            <Icon name="MessageCircle" size={14} /> Enviar WhatsApp
+                    <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(m.phone)}} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg border border-emerald-500/30">
+                        <Icon name="MessageCircle" size={16} /> Enviar WhatsApp
+                    </button>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={(e)=>{e.stopPropagation(); makeCall(m.phone)}} className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2">
+                            <Icon name="Phone" size={14} /> Llamar
                         </button>
-                        
-                        <div className="grid grid-cols-2 gap-3">
-                            <button onClick={(e)=>{e.stopPropagation(); makeCall(m.phone)}} className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2">
-                                <Icon name="Phone" size={14} /> Llamar
-                            </button>
-                            <button onClick={(e)=>{e.stopPropagation(); openWhatsApp('5491100000000', `Quiero agendar visita con ${name}`)}} className="bg-slate-700/50 hover:bg-slate-700 text-slate-300 border border-slate-600 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2">
-                                <Icon name="Calendar" size={14} /> Agendar Visita
-                            </button>
-                        </div>
+                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp('5491136278857', `Hola, soy ${name}, quiero agendar una visita pastoral.`)}} className="bg-slate-700/50 hover:bg-slate-700 text-slate-300 border border-slate-600 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2">
+                            <Icon name="Calendar" size={14} /> Agendar Visita
+                        </button>
                     </div>
 
-                    <div className="bg-slate-800/50 p-4 rounded-xl border border-white/5 space-y-3 mt-2">
+                    <div className="bg-slate-800/50 p-3 rounded-xl border border-white/5 space-y-2 mt-1">
                         <div>
                             <p className="text-[8px] text-slate-500 uppercase font-bold mb-0.5">Teléfono</p>
                             <p className="text-sm text-slate-200 font-mono">{m.phone || 'No registrado'}</p>
@@ -322,21 +317,20 @@ window.Views.Directory = ({ userProfile }) => {
                             <p className="text-[8px] text-slate-500 uppercase font-bold mb-0.5">Dirección</p>
                             <p className={`text-xs text-slate-200 leading-tight ${m.address ? 'group-hover:text-blue-400 transition-colors' : ''}`}>{m.address || 'No registrada'}</p>
                         </div>
-                        <div>
-                            <p className="text-[8px] text-slate-500 uppercase font-bold mb-0.5">Email</p>
-                            <p className="text-[10px] text-slate-200 break-all">{m.email || '-'}</p>
-                        </div>
+                        {(m.emergencyContact || m.emergencyPhone) && (
+                            <div className="pt-2 border-t border-white/5">
+                                <p className="text-[8px] text-red-400 font-bold uppercase flex items-center gap-1 mb-1">
+                                    <Icon name="AlertTriangle" size={10}/> En caso de emergencia
+                                </p>
+                                <p className="text-xs font-bold text-white">{m.emergencyContact}</p>
+                                <p className="text-xs text-red-300 font-mono tracking-wide">{m.emergencyPhone}</p>
+                            </div>
+                        )}
                     </div>
-
-                    {(m.emergencyContact || m.emergencyPhone) && (
-                        <div className="bg-red-900/20 p-3 rounded-xl border border-red-500/20">
-                            <p className="text-[8px] text-red-400 font-bold uppercase flex items-center gap-1 mb-1">
-                                <Icon name="AlertTriangle" size={10}/> En caso de emergencia
-                            </p>
-                            <p className="text-xs font-bold text-white">{m.emergencyContact}</p>
-                            <p className="text-xs text-red-300 font-mono tracking-wide">{m.emergencyPhone}</p>
-                        </div>
-                    )}
+                </div>
+                
+                <div className="mt-auto text-center pt-3 border-t border-white/5 relative z-10">
+                    <p className="text-[8px] text-slate-500">CDS MI CASA • {expirationYear}</p>
                 </div>
             </div>
         );
@@ -354,7 +348,7 @@ window.Views.Directory = ({ userProfile }) => {
                 <div className="flex gap-2 w-full md:w-auto">
                     <div className="relative flex-1 md:w-64">
                         <Icon name="Search" size={16} className="absolute left-3 top-3 text-slate-400"/>
-                        <input className="w-full bg-white border border-slate-200 rounded-xl py-2.5 pl-9 pr-4 text-xs font-bold outline-none focus:ring-2 focus:ring-brand-500" placeholder="Buscar miembro..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
+                        <input className="w-full bg-white border border-slate-200 rounded-xl py-2.5 pl-9 pr-4 text-xs font-bold outline-none focus:ring-2 focus:ring-brand-500" placeholder="Buscar..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
                     </div>
                     <Button icon="UserPlus" onClick={handleNew}>Nuevo</Button>
                 </div>
@@ -427,7 +421,7 @@ window.Views.Directory = ({ userProfile }) => {
                 </div>
             </Modal>
 
-            {/* ELEMENTO OCULTO PARA PDF (CALIDAD HD - SOLO FRENTE - TAMAÑO CR80) */}
+            {/* ELEMENTO OCULTO PARA PDF (CALIDAD HD - SOLO FRENTE - PLANO) */}
             {selectedMember && (
                 <div ref={printRef} style={{ display: 'none', width: '340px', height: '540px' }}>
                     <CardContent m={selectedMember} isFront={true} />
@@ -440,17 +434,18 @@ window.Views.Directory = ({ userProfile }) => {
                     <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-md transition-opacity" onClick={() => setSelectedMember(null)}></div>
                     <div className="relative z-10 animate-enter flex flex-col items-center gap-6">
                         
+                        {/* Contenedor 3D */}
                         <div className="perspective-1000 w-[320px] h-[520px] cursor-pointer group select-none relative" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
                             <div className={`relative w-full h-full duration-700 transform-style-3d transition-all ${isFlipped ? 'rotate-y-180' : ''}`}>
                                 
                                 {/* Frente */}
-                                <div className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden bg-slate-900 border border-slate-800">
+                                <div className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden bg-white border border-slate-200">
                                     <CardContent m={selectedMember} isFront={true} />
-                                    <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-slate-400 flex items-center gap-1 z-50 bg-slate-800/80 px-2 py-0.5 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
+                                    <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-white/50 flex items-center gap-1 z-50 bg-black/20 px-2 py-0.5 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
                                 </div>
                                 
                                 {/* Dorso */}
-                                <div className="absolute w-full h-full backface-hidden rotate-y-180 rounded-[24px] shadow-2xl overflow-hidden bg-slate-900 border border-slate-800">
+                                <div className="absolute w-full h-full backface-hidden rotate-y-180 rounded-[24px] shadow-2xl overflow-hidden bg-[#0f172a] border border-slate-800">
                                     <CardContent m={selectedMember} isFront={false} />
                                 </div>
                             </div>
@@ -462,7 +457,7 @@ window.Views.Directory = ({ userProfile }) => {
                             </button>
                             <button onClick={downloadPDF} disabled={isDownloading} className="bg-blue-600 text-white px-5 py-2.5 rounded-full font-bold shadow-lg hover:bg-blue-500 text-xs flex items-center gap-2 disabled:opacity-50">
                                 {isDownloading ? <Icon name="Loader" className="animate-spin" size={14}/> : <Icon name="Download" size={14}/>}
-                                {isDownloading ? 'Generando...' : 'Descargar Credencial'}
+                                {isDownloading ? 'Generando...' : 'Descargar PDF (Solo Frente)'}
                             </button>
                         </div>
                     </div>
