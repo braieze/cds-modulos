@@ -8,29 +8,25 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
     const { Icon, Button, Input, Modal } = Utils;
 
     // 2. ESTADOS
-    // Datos: Priorizamos las props, sino usamos un estado local vacío
     const [localMembers, setLocalMembers] = useState([]);
     
-    // Sincronizar con props al cargar
     useEffect(() => {
         const incoming = Array.isArray(members) ? members : (Array.isArray(directory) ? directory : []);
         setLocalMembers(incoming);
     }, [members, directory]);
 
     const [searchTerm, setSearchTerm] = useState('');
-    const [selectedMember, setSelectedMember] = useState(null); // Para ver credencial
-    const [isEditing, setIsEditing] = useState(false); // Para el modal de edición/creación
-    const [isFlipped, setIsFlipped] = useState(false); // Efecto 3D
+    const [selectedMember, setSelectedMember] = useState(null);
+    const [isEditing, setIsEditing] = useState(false);
+    const [isFlipped, setIsFlipped] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
     
-    // Estado del Formulario
     const initialForm = { 
         id: '', name: '', role: 'Miembro', email: '', phone: '', 
         address: '', birthDate: '', emergencyContact: '', emergencyPhone: '', photo: '' 
     };
     const [form, setForm] = useState(initialForm);
 
-    // Referencia PDF
     const cardRef = useRef(null);
 
     // 3. HELPERS
@@ -49,26 +45,36 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
         return isNaN(age) ? null : age;
     };
 
+    const formatDate = (dateString) => {
+        if (!dateString) return '-';
+        const date = new Date(dateString);
+        return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
+
     const getPhoto = (photoUrl, name) => {
         if (photoUrl && photoUrl.length > 5) return photoUrl;
         return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=f1f5f9&color=64748b&size=256`;
     };
 
     const openWhatsApp = (phone) => {
-        if (!phone) return;
+        if (!phone) return Utils.notify('Sin número de WhatsApp', 'error');
         const p = phone.replace(/\D/g, '');
         window.open(`https://wa.me/${p}`, '_blank');
     };
+    
+    const makeCall = (phone) => {
+        if (!phone) return Utils.notify('Sin número de teléfono', 'error');
+        window.open(`tel:${phone}`, '_self');
+    };
 
     const openMaps = (address) => {
-        if (!address) return;
+        if (!address) return Utils.notify('Sin dirección registrada', 'error');
         const q = encodeURIComponent(address);
         window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, '_blank');
     };
 
     // 4. LÓGICA CRUD
     const handleEdit = (member) => {
-        // Mapear datos del miembro al formulario (normalizando nombres de campos)
         setForm({
             id: member.id,
             name: getField(member, 'name', 'nombre') || '',
@@ -85,42 +91,33 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
     };
 
     const handleNew = () => {
-        setForm({ ...initialForm, id: Date.now().toString(36) }); // ID temporal simple
+        setForm({ ...initialForm, id: Date.now().toString(36) });
         setIsEditing(true);
     };
 
     const handleDelete = (id) => {
         if(!confirm("¿Estás seguro de eliminar a este miembro?")) return;
-        
-        // Si existe la función prop deleteData, la usamos
-        if (typeof deleteData === 'function') {
-            deleteData('directory', id); // Asumiendo que la colección se llama directory
-        }
-        // Actualizamos localmente para feedback inmediato
+        if (typeof deleteData === 'function') deleteData('directory', id);
         setLocalMembers(prev => prev.filter(m => m.id !== id));
         if (selectedMember?.id === id) setSelectedMember(null);
+        Utils.notify("Miembro eliminado");
     };
 
     const handleSave = () => {
-        if (!form.name) return alert("El nombre es obligatorio");
-
+        if (!form.name) return Utils.notify("El nombre es obligatorio", 'error');
         const memberData = { ...form };
-        
-        // Determinar si es Crear o Editar
         const exists = localMembers.find(m => m.id === form.id);
 
         if (exists) {
-            // EDITAR
             if (typeof updateData === 'function') updateData('directory', form.id, memberData);
             setLocalMembers(prev => prev.map(m => m.id === form.id ? memberData : m));
+            Utils.notify("Datos actualizados");
         } else {
-            // CREAR
-            // Si no hay ID (caso raro), generamos uno
             if (!memberData.id) memberData.id = Date.now().toString(36);
             if (typeof addData === 'function') addData('directory', memberData);
             setLocalMembers(prev => [...prev, memberData]);
+            Utils.notify("Miembro registrado");
         }
-        
         setIsEditing(false);
     };
 
@@ -138,7 +135,7 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
     const downloadPDF = async () => {
         if (!selectedMember || !cardRef.current) return;
         setIsDownloading(true);
-        setIsFlipped(false); // Forzar frente
+        setIsFlipped(false);
 
         setTimeout(async () => {
             try {
@@ -154,13 +151,14 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                     margin: 0,
                     filename: `Credencial_${selectedMember.name}.pdf`,
                     image: { type: 'jpeg', quality: 0.98 },
-                    html2canvas: { scale: 2, useCORS: true, logging: false },
+                    html2canvas: { scale: 2, useCORS: true, logging: false, scrollY: 0 },
                     jsPDF: { unit: 'mm', format: [55, 88], orientation: 'portrait' } 
                 };
                 await window.html2pdf().set(opt).from(cardRef.current).save();
-            } catch (error) { console.error(error); alert("Error al generar PDF"); }
+                Utils.notify("PDF descargado con éxito");
+            } catch (error) { console.error(error); Utils.notify("Error al generar PDF", 'error'); }
             setIsDownloading(false);
-        }, 500);
+        }, 800);
     };
 
     // --- RENDERIZADO DE LA CREDENCIAL ---
@@ -170,14 +168,15 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
         const name = getField(m, 'name', 'nombre') || 'Sin Nombre';
         const role = getField(m, 'role', 'rol') || 'Miembro';
         const photo = getPhoto(getField(m, 'photo', 'foto'), name);
-        const age = calculateAge(getField(m, 'birthDate', 'fechaNacimiento'));
+        const birthDateStr = getField(m, 'birthDate', 'fechaNacimiento');
+        const age = calculateAge(birthDateStr);
+        const birthDateFormatted = formatDate(birthDateStr);
         const email = getField(m, 'email', 'correo');
         const phone = getField(m, 'phone', 'telefono');
         const address = getField(m, 'address', 'direccion');
         const emerContact = getField(m, 'emergencyContact', 'contactoEmergencia');
         const emerPhone = getField(m, 'emergencyPhone', 'telefonoEmergencia');
         
-        // Fecha de Vencimiento (Fin del año actual)
         const expirationYear = new Date().getFullYear();
         const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${id}`;
 
@@ -185,8 +184,8 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
             <div className="perspective-1000 w-[320px] h-[520px] cursor-pointer group select-none relative" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
                 <div className={`relative w-full h-full duration-700 transform-style-3d transition-all ${isFlipped ? 'rotate-y-180' : ''}`}>
                     
-                    {/* --- FRENTE --- */}
-                    <div ref={!isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 flex flex-col items-center pt-8 pb-4 px-6">
+                    {/* --- FRENTE (CORREGIDO Y COMPLETO) --- */}
+                    <div ref={!isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 flex flex-col items-center pt-8 pb-4 px-6 z-20">
                         
                         {/* Decoración */}
                         <div className="absolute top-4 w-12 h-3 bg-slate-200 rounded-full mx-auto left-0 right-0 shadow-inner"></div>
@@ -200,32 +199,42 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                         </div>
 
                         {/* Foto */}
-                        <div className="relative w-36 h-36 mb-5">
+                        <div className="relative w-36 h-36 mb-4">
                             <div className="absolute inset-0 bg-gradient-to-tr from-brand-400 to-indigo-500 rounded-full blur-sm opacity-40 animate-pulse"></div>
                             <div className="relative w-full h-full rounded-full p-1 bg-gradient-to-tr from-brand-400 to-indigo-500 shadow-xl">
                                 <img src={photo} className="w-full h-full object-cover rounded-full bg-white border-2 border-white" alt={name} onError={(e) => e.target.src = getPhoto(null, name)}/>
                             </div>
-                            {/* Edad Flotante */}
-                            {age && (
-                                <div className="absolute bottom-0 right-0 bg-slate-800 text-white text-[10px] font-bold px-2 py-1 rounded-full border-2 border-white shadow-sm">
-                                    {age} AÑOS
-                                </div>
-                            )}
                         </div>
 
                         {/* Info Principal */}
-                        <div className="text-center space-y-1 mb-2 w-full z-10">
+                        <div className="text-center space-y-1 mb-4 w-full z-10 flex-1">
                             <h2 className="text-2xl font-extrabold text-slate-800 leading-tight px-1 truncate">{name}</h2>
-                            <span className="inline-block px-4 py-1 bg-brand-50 text-brand-700 text-[10px] font-bold rounded-full uppercase tracking-wider border border-brand-100 shadow-sm">
+                            <span className="inline-block px-4 py-1 bg-brand-50 text-brand-700 text-[10px] font-bold rounded-full uppercase tracking-wider border border-brand-100 shadow-sm mb-3">
                                 {role}
                             </span>
+                            
+                            {/* Datos Clave (Edad y Nacimiento) */}
+                            <div className="flex items-center justify-center gap-4 text-xs text-slate-500 border-t border-slate-100 pt-3 w-4/5 mx-auto">
+                                {age && (
+                                    <div className="text-center">
+                                        <p className="font-bold text-slate-700 text-base">{age}</p>
+                                        <p className="text-[9px] uppercase font-bold tracking-wider">Años</p>
+                                    </div>
+                                )}
+                                {birthDateFormatted !== '-' && (
+                                    <div className="text-center border-l border-slate-200 pl-4">
+                                        <p className="font-bold text-slate-700 text-sm">{birthDateFormatted}</p>
+                                        <p className="text-[9px] uppercase font-bold tracking-wider">Nacimiento</p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         {/* Footer */}
                         <div className="mt-auto w-full bg-slate-50 p-3 rounded-2xl border border-slate-200 flex items-center justify-between gap-3 z-10">
                             <div className="text-left overflow-hidden">
-                                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">Vencimiento</p>
-                                <p className="text-sm font-bold text-slate-700">DIC {expirationYear}</p>
+                                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">ID Miembro</p>
+                                <p className="text-sm font-mono font-black text-slate-700 truncate">{id}</p>
                             </div>
                             <div className="shrink-0 bg-white p-1 rounded-lg border border-slate-100 shadow-sm">
                                 <img src={qrUrl} className="w-12 h-12 mix-blend-multiply opacity-90" alt="QR" />
@@ -234,9 +243,9 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                         <div className="absolute bottom-1.5 text-[9px] text-slate-300 flex items-center gap-1"><Icon name="RotateCw" size={10} /></div>
                     </div>
 
-                    {/* --- DORSO --- */}
-                    <div ref={isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden rotate-y-180 bg-slate-800 text-white rounded-3xl shadow-2xl overflow-hidden flex flex-col p-6 relative border border-slate-700">
-                         <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-brand-600 rounded-full blur-[80px] opacity-20"></div>
+                    {/* --- DORSO (CORREGIDO Y FUNCIONAL) --- */}
+                    <div ref={isFlipped ? cardRef : null} className="absolute w-full h-full backface-hidden rotate-y-180 bg-slate-800 text-white rounded-3xl shadow-2xl overflow-hidden flex flex-col p-6 relative border border-slate-700 z-20">
+                         <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-brand-600 rounded-full blur-[80px] opacity-20 pointer-events-none"></div>
                          <div className="absolute top-4 w-12 h-3 bg-slate-700 rounded-full mx-auto left-0 right-0 shadow-inner"></div>
 
                          <div className="mt-6 text-center mb-6 relative z-10">
@@ -248,40 +257,55 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
 
                          <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-4 z-10">
                             
-                            {/* Contacto Directo */}
+                            {/* Botones de Acción Rápida */}
+                            <div className="grid grid-cols-2 gap-3 mb-2">
+                                <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(phone)}} className="bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition-all shadow-lg shadow-emerald-500/20 active:scale-95">
+                                    <Icon name="MessageCircle" size={14} /> WhatsApp
+                                </button>
+                                <button onClick={(e)=>{e.stopPropagation(); makeCall(phone)}} className="bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition-all shadow-lg shadow-blue-500/20 active:scale-95">
+                                    <Icon name="Phone" size={14} /> Llamar
+                                </button>
+                            </div>
+
+                            {/* Datos Detallados */}
                             <div className="bg-white/5 p-3 rounded-xl border border-white/5 space-y-3">
-                                <div onClick={(e)=>{e.stopPropagation(); openWhatsApp(phone)}} className="cursor-pointer hover:opacity-80">
+                                <div>
                                     <p className="text-[9px] text-slate-400 uppercase flex items-center gap-1"><Icon name="Phone" size={10}/> Teléfono</p>
-                                    <p className="text-sm font-medium text-white mt-0.5">{phone || 'No registrado'}</p>
+                                    <p className="text-sm font-medium text-white mt-0.5 font-mono">{phone || 'No registrado'}</p>
                                 </div>
-                                <div onClick={(e)=>{e.stopPropagation(); openMaps(address)}} className="cursor-pointer hover:opacity-80">
+                                
+                                <div onClick={(e)=>{e.stopPropagation(); openMaps(address)}} className={`cursor-pointer hover:opacity-80 ${!address && 'pointer-events-none'}`}>
                                     <p className="text-[9px] text-slate-400 uppercase flex items-center gap-1"><Icon name="MapPin" size={10}/> Dirección</p>
-                                    <p className="text-xs font-medium text-blue-200 mt-0.5 leading-tight underline decoration-blue-200/50">{address || 'Sin dirección'}</p>
+                                    <p className={`text-xs font-medium mt-0.5 leading-tight ${address ? 'text-blue-300 underline decoration-blue-300/50' : 'text-slate-500'}`}>{address || 'Sin dirección'}</p>
                                 </div>
+                                
                                 <div>
                                     <p className="text-[9px] text-slate-400 uppercase flex items-center gap-1"><Icon name="Mail" size={10}/> Email</p>
                                     <p className="text-xs font-medium text-slate-200 break-all mt-0.5">{email || '-'}</p>
                                 </div>
                             </div>
 
-                            {/* Emergencia (Opcional) */}
+                            {/* Emergencia */}
                             {(emerContact || emerPhone) && (
                                 <div className="bg-red-500/10 p-3 rounded-xl border border-red-500/20">
                                     <p className="text-[9px] text-red-300 font-bold uppercase flex items-center gap-1 mb-1">
                                         <Icon name="AlertTriangle" size={10}/> En caso de emergencia
                                     </p>
                                     <p className="text-xs font-bold text-white">{emerContact}</p>
-                                    {emerPhone && <a href={`tel:${emerPhone}`} className="text-xs text-red-200 hover:text-white transition-colors block mt-0.5 font-mono">{emerPhone}</a>}
+                                    {emerPhone && <a href={`tel:${emerPhone}`} onClick={(e)=>e.stopPropagation()} className="text-xs text-red-200 hover:text-white transition-colors block mt-0.5 font-mono">{emerPhone}</a>}
                                 </div>
                             )}
 
-                            {/* Botón Agendar Visita */}
+                            {/* Botón Agendar Visita (Placeholder) */}
                             <button 
                                 onClick={(e) => { e.stopPropagation(); Utils.notify('Función Visita: Próximamente'); }}
                                 className="w-full bg-brand-600 hover:bg-brand-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95 mt-2"
                             >
                                 <Icon name="Calendar" size={14} /> Agendar Visita
                             </button>
+                         </div>
+                         <div className="mt-3 pt-3 border-t border-white/5 text-center">
+                             <p className="text-[9px] text-slate-500">Documento interno. Vence: DIC {expirationYear}</p>
                          </div>
                     </div>
                 </div>
@@ -325,7 +349,6 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                                 key={member.id} 
                                 className="group bg-white p-3 rounded-2xl shadow-sm border border-slate-100 hover:shadow-lg transition-all flex items-center gap-3 relative"
                             >
-                                {/* Área click para ver credencial */}
                                 <div className="flex-1 flex items-center gap-3 cursor-pointer" onClick={() => { setSelectedMember(member); setIsFlipped(false); }}>
                                     <img src={photo} className="w-12 h-12 rounded-xl object-cover bg-slate-100" alt={name}/>
                                     <div className="flex-1 min-w-0">
@@ -334,7 +357,6 @@ window.Views.Directory = ({ members, directory, addData, updateData, deleteData 
                                     </div>
                                 </div>
                                 
-                                {/* Acciones (Editar/Borrar) */}
                                 <div className="flex flex-col gap-1 border-l border-slate-100 pl-2">
                                     <button onClick={()=>handleEdit(member)} className="text-slate-400 hover:text-brand-600 p-1"><Icon name="Edit" size={14}/></button>
                                     <button onClick={()=>handleDelete(member.id)} className="text-slate-400 hover:text-red-600 p-1"><Icon name="Trash" size={14}/></button>
