@@ -2,7 +2,59 @@
     window.Utils = window.Utils || {};
     const { useState, useEffect, useRef } = React;
 
-    // --- TOASTS ---
+    // --- 1. HELPERS LÓGICOS (DEFINIDOS PRIMERO) ---
+    
+    // Parseo seguro de fechas para evitar el error de "un día antes"
+    const parseLocalDate = (dateStr) => {
+        if (!dateStr) return new Date();
+        const [y, m, d] = dateStr.split('-').map(Number);
+        return new Date(y, m - 1, d);
+    };
+
+    const formatDate = (dateStr, fmt = 'short') => {
+        if(!dateStr) return '';
+        const date = parseLocalDate(dateStr);
+        if(fmt === 'long') return date.toLocaleDateString('es-AR', { weekday:'long', day: 'numeric', month: 'long' });
+        if(fmt === 'month') return date.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+        // short
+        return date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
+
+    const getLocalDate = () => {
+        const d = new Date();
+        const offset = d.getTimezoneOffset() * 60000;
+        return new Date(d.getTime() - offset).toISOString().split('T')[0];
+    };
+
+    const formatCurrency = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 }).format(val);
+
+    const formatTime = (t) => t ? t : '--:--';
+
+    const compressImage = (file) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const MAX_WIDTH = 800;
+                    let width = img.width;
+                    let height = img.height;
+                    if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', 0.7));
+                };
+            };
+            reader.onerror = reject;
+        });
+    };
+
+    // --- 2. SISTEMA DE TOASTS ---
     let toastListener = null;
     const notify = (msg, type = 'success') => {
         if (toastListener) toastListener(msg, type);
@@ -33,7 +85,7 @@
         );
     };
 
-    // --- ICONOS ---
+    // --- 3. ICONOS (CORREGIDO ERROR DE SINTAXIS EN SEND) ---
     const Icon = ({ name, size = 20, className = "" }) => {
         const icons = {
             Home: <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>,
@@ -87,7 +139,6 @@
             ArrowRight: <React.Fragment><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></React.Fragment>,
             ArrowUp: <React.Fragment><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></React.Fragment>,
             Award: <React.Fragment><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></React.Fragment>,
-            // --- CORRECCIÓN AQUÍ: Agregado Fragment para Send ---
             Send: <React.Fragment><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></React.Fragment>
         };
         return (
@@ -97,43 +148,7 @@
         );
     };
 
-    // --- HELPERS LÓGICOS ---
-    // Agregada función segura para fechas
-    const parseLocalDate = (dateStr) => {
-        if (!dateStr) return new Date();
-        const [y, m, d] = dateStr.split('-').map(Number);
-        return new Date(y, m - 1, d);
-    };
-
-    const formatCurrency = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 }).format(val);
-
-    const formatTime = (t) => t ? t : '--:--';
-
-    const compressImage = (file) => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = (event) => {
-                const img = new Image();
-                img.src = event.target.result;
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 800;
-                    let width = img.width;
-                    let height = img.height;
-                    if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-                    resolve(canvas.toDataURL('image/jpeg', 0.7));
-                };
-            };
-            reader.onerror = reject;
-        });
-    };
-
-    // --- COMPONENTES INPUTS ---
+    // --- 4. COMPONENTES UI ---
     const Button = ({ children, onClick, variant = 'primary', icon, className = "", disabled=false, size='md' }) => {
         const v = { primary: "bg-brand-600 text-white hover:bg-brand-700 shadow-glow", secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50", danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100" };
         const s = { sm: "px-3 py-1.5 text-xs", md: "px-5 py-3 text-sm" };
@@ -183,6 +198,7 @@
         );
     };
 
+    // --- 5. EXPORTAR TODO ---
     window.Utils = { 
         ...window.Utils, 
         Icon, Button, Input, Modal, Select, DateFilter, SmartSelect, ToastContainer, notify, 
