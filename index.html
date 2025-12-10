@@ -80,7 +80,7 @@
     <!-- Carga de Módulos -->
     <script type="text/babel" src="src/Utils.js"></script>
     <script type="text/babel" src="src/DataLogic.js"></script>
-    <script type="text/babel" src="src/views/Landing.js"></script> <!-- NUEVA LANDING -->
+    <script type="text/babel" src="src/views/Landing.js"></script>
     
     <script type="text/babel" src="src/views/GlobalCalendar.js"></script>
     <script type="text/babel" src="src/views/EventDetails.js"></script>
@@ -104,6 +104,7 @@
         const { useFirebaseListeners, addData, updateData, deleteData } = DataLogic;
         const Views = window.Views || {};
         
+        // Importación de TODAS las vistas (incluyendo Landing y Visits)
         const { Landing, Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging, Blog, QuickActions, Visits } = Views;
 
         const LoginScreen = ({ onLogin, onBack, loading, error }) => (
