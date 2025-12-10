@@ -181,7 +181,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
         }
     };
 
-    // --- TARJETA VISUAL (DISEÑO SPLIT) ---
+    // --- TARJETA VISUAL (DISEÑO SPLIT CON DETALLES) ---
     const CardContent = ({ m, isFront }) => {
         if (!m) return null;
         
@@ -231,12 +231,16 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
                         <div className={`absolute top-[-1px] left-0 w-full h-16 ${DARK_BG} rounded-t-[50%] scale-x-150 -translate-y-1/2 z-0`}></div>
 
                         {/* Datos Texto (Sobre fondo oscuro) */}
-                        <div className="relative z-10 text-center mt-12 mb-auto w-full">
+                        <div className="relative z-10 text-center mt-12 mb-auto w-full flex flex-col items-center">
                             <h1 className="text-2xl font-black text-white leading-none mb-1 drop-shadow-md">{firstName}</h1>
-                            <h2 className="text-xl font-bold text-blue-400 leading-tight mb-3 drop-shadow-md">{lastName}</h2>
+                            <h2 className="text-xl font-bold text-blue-400 leading-tight drop-shadow-md">{lastName}</h2>
+
+                            {/* LÍNEA SEPARADORA (DETALLE 1) */}
+                            <div className="w-12 h-1 bg-blue-500 rounded-full my-3"></div>
                             
-                            {/* Badge ROL */}
-                            <span className="inline-block bg-slate-800 border border-slate-600 text-white px-5 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-lg">
+                            {/* Badge ROL con ICONO (DETALLE 2) */}
+                            <span className="inline-flex items-center gap-1.5 bg-slate-800 border border-slate-600 text-white px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-lg">
+                                <Icon name="Shield" size={10} className="text-blue-400" />
                                 {role}
                             </span>
                         </div>
@@ -248,8 +252,12 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
                                 <p className="text-[10px] font-mono font-bold text-white tracking-widest uppercase">{id}</p>
                                 <p className="text-[7px] font-bold text-blue-400 uppercase mt-0.5 tracking-wider">CDS MI CASA</p>
                             </div>
-                            <div className="bg-white p-1 rounded-md">
-                                <img src={qrUrl} className="w-10 h-10" alt="QR" crossOrigin="anonymous"/>
+                            <div className="flex items-center gap-2">
+                                {/* ELEMENTO DECORATIVO ESQUINA (DETALLE 3) */}
+                                <Icon name="Award" size={16} className="text-blue-500 opacity-50" />
+                                <div className="bg-white p-1 rounded-md">
+                                    <img src={qrUrl} className="w-10 h-10" alt="QR" crossOrigin="anonymous"/>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -445,5 +453,3 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
         </div>
     );
 };
-
-
