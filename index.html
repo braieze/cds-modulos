@@ -88,7 +88,6 @@
     <script type="text/babel" src="src/views/Messaging.js"></script>
     <script type="text/babel" src="src/views/Blog.js"></script>
     <script type="text/babel" src="src/views/QuickActions.js"></script>
-    <!-- NUEVO MODULO DE VISITAS -->
     <script type="text/babel" src="src/views/Visits.js"></script>
 </head>
 <body>
@@ -100,7 +99,7 @@
         const DataLogic = window.DataLogic || {};
         const { useFirebaseListeners, addData, updateData, deleteData } = DataLogic;
         const Views = window.Views || {};
-        // IMPORTAR VISITS AQUI
+        
         const { Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging, Blog, QuickActions, Visits } = Views;
 
         const LoginScreen = ({ onLogin, loading, error }) => (
@@ -199,7 +198,6 @@
                                 <div className="mt-6 mb-2 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Gestión</div>
                                 {userProfile.role === 'Pastor' && <NavItem id="finances" icon="Wallet" label="Tesorería" />}
                                 <NavItem id="members" icon="Users" label="Directorio" />
-                                {/* NUEVO BOTON VISITAS (Visible para líderes y pastores) */}
                                 {['Pastor', 'Líder', 'Servidor'].includes(userProfile.role) && <NavItem id="visits" icon="MapPin" label="Visitas Pastoral" />}
                                 <NavItem id="messages" icon="Mail" label="Mensajería" />
                             </nav>
@@ -214,7 +212,8 @@
                         <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24">
                             <div className="max-w-6xl mx-auto h-full">
                                 {activeTab === 'dashboard' && Dashboard && <Dashboard userProfile={userProfile} worship={worship} servers={servers} tasks={tasks} messages={messages} ebd={ebd} youth={youth} updateData={updateData} setActiveTab={setActiveTab} />}
-                                {activeTab === 'members' && Directory && <Directory members={members} addData={addData} updateData={updateData} deleteData={deleteData} userProfile={userProfile} />}
+                                {/* Directorio Recibe setActiveTab y UserProfile */}
+                                {activeTab === 'members' && Directory && <Directory members={members} addData={addData} updateData={updateData} deleteData={deleteData} userProfile={userProfile} setActiveTab={setActiveTab} />}
                                 {activeTab === 'worship' && Worship && <Worship worship={worship} songs={songs} members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
                                 {activeTab === 'finances' && Finances && <Finances finances={finances} addData={addData} userProfile={userProfile} />}
                                 {activeTab === 'ebd' && MinistryWithTasks && <MinistryWithTasks title="Escuela Bíblica" col="ebd" filterMinistry="EBD" members={members} tasks={tasks} events={ebd} addData={addData} deleteData={deleteData} updateData={updateData} />}
