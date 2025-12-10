@@ -1,6 +1,6 @@
 window.Views = window.Views || {};
 
-window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
+window.Views.Directory = ({ members, addData, updateData, deleteData, userProfile }) => {
     // 1. HOOKS
     const { useState, useMemo, useRef, useEffect } = React;
     const Utils = window.Utils || {};
@@ -13,13 +13,21 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
     const [isFlipped, setIsFlipped] = useState(false); 
     const [isDownloading, setIsDownloading] = useState(false);
     
+    // Listas Predefinidas
+    const ROLES = ['Pastor', 'Líder', 'Servidor', 'Miembro'];
+    const DEFAULT_AREAS = ['Alabanza', 'Ujieres', 'Jóvenes', 'Escuela Bíblica', 'Evangelismo', 'Matrimonios', 'Hombres', 'Mujeres', 'General'];
+    
+    const [customAreas, setCustomAreas] = useState([]); // Áreas temporales agregadas
+    const [isAddingArea, setIsAddingArea] = useState(false); // Input para nueva área
+    const [newAreaName, setNewAreaName] = useState("");
+
     const initialForm = { 
         id: '', name: '', role: 'Miembro', ministry: 'General', email: '', phone: '', 
         address: '', birthDate: '', emergencyContact: '', emergencyPhone: '', photo: '', joinedDate: '' 
     };
     const [form, setForm] = useState(initialForm);
 
-    const printRef = useRef(null); // Referencia oculta para el PDF
+    const printRef = useRef(null); 
 
     // 3. HELPERS
     const getField = (item, ...keys) => {
@@ -39,8 +47,17 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
         return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=0f172a&color=cbd5e1&size=512&font-size=0.33`;
     };
 
-    const generateCustomID = (name) => {
-        if (!name) return 'CDS-0000';
+    // ID Estable: Si no tiene uno guardado, generamos uno basado en su ID de DB (no random)
+    const getStableID = (m) => {
+        if (m.credentialId) return m.credentialId;
+        // Fallback estable usando el ID del documento
+        const suffix = m.id ? m.id.slice(0, 4).toUpperCase() : 'TEMP'; 
+        const initials = m.name ? m.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase() : 'XX';
+        return `CDS-${initials}-${suffix}`;
+    };
+
+    // ID para nuevos registros (Random solo al crear)
+    const generateNewID = (name) => {
         const initials = name.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase();
         const randomNum = Math.floor(1000 + Math.random() * 9000);
         return `CDS-${initials}-${randomNum}`;
@@ -58,7 +75,8 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
     };
 
     const openMaps = (address) => {
-        if (!address) return Utils.notify('Sin dirección registrada', 'error');
+        if (!address || address === 'No registrada') return Utils.notify('Sin dirección registrada', 'error');
+        // Usar Google Maps Search API
         window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`, '_blank');
     };
 
@@ -76,18 +94,21 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
             emergencyContact: getField(member, 'emergencyContact', 'contactoEmergencia') || '',
             emergencyPhone: getField(member, 'emergencyPhone', 'telefonoEmergencia') || '',
             photo: getField(member, 'photo', 'foto') || '',
-            joinedDate: getField(member, 'joinedDate', 'fechaIngreso') || ''
+            joinedDate: getField(member, 'joinedDate', 'fechaIngreso') || '',
+            credentialId: member.credentialId || '' // Mantener ID si existe
         });
         setIsEditing(true);
+        setIsAddingArea(false);
     };
 
     const handleNew = () => {
         setForm({ ...initialForm, joinedDate: new Date().toISOString().split('T')[0] });
         setIsEditing(true);
+        setIsAddingArea(false);
     };
 
     const handleDelete = (id) => {
-        if(!confirm("¿Eliminar miembro?")) return;
+        if(!confirm("¿Estás seguro de eliminar a este miembro permanentemente?")) return;
         deleteData('members', id);
         if (selectedMember?.id === id) setSelectedMember(null);
         Utils.notify("Miembro eliminado");
@@ -108,19 +129,30 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
             emergencyPhone: form.emergencyPhone || '',
             photo: form.photo || '',
             joinedDate: form.joinedDate || '',
-            credentialId: form.credentialId || generateCustomID(form.name)
+            // Si ya tiene ID lo dejamos, si no, generamos uno nuevo fijo
+            credentialId: form.credentialId || generateNewID(form.name)
         };
 
         if (form.id) {
             updateData('members', form.id, cleanData);
             if(selectedMember && selectedMember.id === form.id) setSelectedMember({ id: form.id, ...cleanData });
-            Utils.notify("Actualizado");
+            Utils.notify("Datos actualizados");
         } else {
             cleanData.createdAt = new Date().toISOString();
             addData('members', cleanData);
-            Utils.notify("Creado");
+            Utils.notify("Miembro creado");
         }
         setIsEditing(false);
+    };
+
+    // Lógica para agregar área personalizada
+    const handleAddCustomArea = () => {
+        if (newAreaName.trim()) {
+            setCustomAreas([...customAreas, newAreaName.trim()]);
+            setForm({...form, ministry: newAreaName.trim()});
+            setNewAreaName("");
+            setIsAddingArea(false);
+        }
     };
 
     const filteredMembers = (members || []).filter(m => {
@@ -128,136 +160,109 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
         return (m.name||'').toLowerCase().includes(term) || (m.role||'').toLowerCase().includes(term);
     });
 
-    // 5. PDF ROBUSTO (Carga Dinámica Segura)
+    // 5. PDF
     const downloadPDF = async () => {
         if (!selectedMember || !printRef.current) return;
         setIsDownloading(true);
 
-        try {
-            // Asegurar carga de librería
-            if (!window.html2pdf) {
-                console.log("Cargando librería PDF...");
-                await new Promise((resolve, reject) => {
-                    const script = document.createElement('script');
-                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-                    script.onload = resolve;
-                    script.onerror = () => reject("Error al cargar script PDF");
-                    document.head.appendChild(script);
-                });
-            }
+        setTimeout(async () => {
+            try {
+                let worker = window.html2pdf;
+                if (!worker || typeof worker !== 'function') {
+                    await new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+                        script.onload = resolve;
+                        script.onerror = () => reject("Error al cargar script PDF");
+                        document.head.appendChild(script);
+                    });
+                    worker = window.html2pdf;
+                }
 
-            // Esperar un momento a que el script se inicialice
-            await new Promise(r => setTimeout(r, 500));
-
-            const element = printRef.current;
-            element.style.display = 'block'; // Mostrar temporalmente
-            
-            const opt = {
-                margin: 0,
-                filename: `Credencial_${selectedMember.name.replace(/\s+/g,'_')}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { 
-                    scale: 4, 
-                    useCORS: true, 
-                    logging: false,
-                    backgroundColor: '#ffffff' // Fondo base blanco
-                },
-                jsPDF: { unit: 'mm', format: [54, 86], orientation: 'portrait' }
-            };
-            
-            if (window.html2pdf) {
-                await window.html2pdf().set(opt).from(element).save();
+                const element = printRef.current;
+                element.style.display = 'block'; 
+                
+                const opt = {
+                    margin: 0,
+                    filename: `Credencial_${selectedMember.name.replace(/\s+/g,'_')}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 4, useCORS: true, logging: false, backgroundColor: '#ffffff' },
+                    jsPDF: { unit: 'mm', format: [54, 86], orientation: 'portrait' }
+                };
+                
+                await worker().set(opt).from(element).save();
                 Utils.notify("PDF Descargado");
-            } else {
-                alert("Error: La librería PDF no está disponible.");
+                element.style.display = 'none'; 
+            } catch (error) { 
+                console.error("PDF Error:", error); 
+                Utils.notify("Error al generar PDF.", 'error'); 
+            } finally {
+                setIsDownloading(false);
             }
-            
-            element.style.display = 'none'; // Ocultar
-        } catch (error) { 
-            console.error("PDF Error:", error); 
-            Utils.notify("Error al generar PDF. Intenta de nuevo.", 'error'); 
-        } finally {
-            setIsDownloading(false);
-        }
+        }, 500);
     };
 
-    // --- TARJETA VISUAL (DISEÑO SPLIT CON DETALLES) ---
+    // --- TARJETA VISUAL (DISEÑO FOTO 1) ---
     const CardContent = ({ m, isFront }) => {
         if (!m) return null;
         
-        const id = m.credentialId || generateCustomID(m.name);
+        const id = getStableID(m);
         const nameParts = (m.name || 'Sin Nombre').split(' ');
         const firstName = nameParts[0];
         const lastName = nameParts.slice(1).join(' ');
         const role = m.role || 'Miembro';
-        const ministry = m.ministry || 'General';
         const photo = getPhoto(m.photo, m.name);
         const year = new Date().getFullYear();
         const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${m.id}`;
         
-        // Color Azul Oscuro Profundo (El mismo de atrás)
-        const DARK_BG = "bg-[#0f172a]"; // Slate 900 personalizado
+        const DARK_BG = "bg-[#0B1120]"; // Un azul más oscuro casi negro, elegante
 
         if (isFront) {
             return (
                 <div className="w-full h-full bg-white relative overflow-hidden flex flex-col items-center select-none font-sans">
                     
-                    {/* --- PARTE SUPERIOR (BLANCA) --- */}
-                    {/* Ocupa el 60% para dejar espacio a la foto y textos superiores */}
-                    <div className="w-full h-[55%] bg-white relative pt-8 text-center z-10 flex flex-col items-center">
-                        {/* Header */}
-                        <div className="mb-1">
-                            <div className="w-8 h-1 bg-slate-200 rounded-full mx-auto mb-2"></div>
-                            <p className="text-[8px] font-black text-slate-400 tracking-[0.25em] uppercase mb-1">CONQUISTADORES</p>
-                            <h2 className="text-sm font-bold text-blue-600 uppercase tracking-wider">Credencial Digital</h2>
-                            <p className="text-[9px] font-bold text-slate-800">{year}</p>
+                    {/* PARTE SUPERIOR (BLANCA) */}
+                    <div className="w-full h-[50%] bg-white relative pt-8 text-center z-10 flex flex-col items-center">
+                        <div className="w-8 h-1.5 bg-slate-800 rounded-full mb-3"></div>
+                        <p className="text-[7px] font-black text-slate-400 tracking-[0.25em] uppercase mb-1">CONQUISTADORES</p>
+                        <h2 className="text-sm font-extrabold text-blue-600 uppercase tracking-wider">Credencial Digital</h2>
+                        <p className="text-[10px] font-bold text-slate-800 mt-1">{year}</p>
+                    </div>
+
+                    {/* FOTO CENTRAL CON CORTE CIRCULAR (BORDER TRICK) */}
+                    {/* El borde blanco grueso crea el efecto de corte sobre el fondo azul */}
+                    <div className="absolute top-[43%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-30">
+                        <div className="w-[140px] h-[140px] rounded-full bg-white flex items-center justify-center border-[8px] border-white shadow-xl">
+                            <img src={photo} className="w-full h-full object-cover rounded-full bg-slate-200" alt={m.name} crossOrigin="anonymous"/>
                         </div>
                     </div>
 
-                    {/* FOTO CENTRAL (FLOTANTE) */}
-                    {/* Posicionada absolutamente para estar ENTRE las dos secciones */}
-                    <div className="absolute top-[42%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-30">
-                        <div className="w-[140px] h-[140px] rounded-full p-1.5 bg-white shadow-xl shadow-slate-900/20">
-                            <img src={photo} className="w-full h-full object-cover rounded-full bg-slate-100 border-2 border-slate-50" alt={m.name} crossOrigin="anonymous"/>
-                        </div>
-                    </div>
+                    {/* PARTE INFERIOR (AZUL OSCURO) */}
+                    <div className={`w-full h-[50%] ${DARK_BG} relative flex flex-col items-center justify-end pb-6 px-5 z-0`}>
+                        {/* Decoración de fondo sutil */}
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/5 rounded-full blur-2xl pointer-events-none"></div>
 
-                    {/* --- PARTE INFERIOR (AZUL OSCURO) --- */}
-                    {/* Ocupa el resto, fondo sólido oscuro */}
-                    <div className={`w-full h-[45%] ${DARK_BG} relative flex flex-col items-center justify-end pb-6 px-5 z-0`}>
-                        
-                        {/* Curva de Unión (Efecto Visual) */}
-                        {/* Esto crea la onda suave entre el blanco y el azul */}
-                        <div className={`absolute top-[-1px] left-0 w-full h-16 ${DARK_BG} rounded-t-[50%] scale-x-150 -translate-y-1/2 z-0`}></div>
-
-                        {/* Datos Texto (Sobre fondo oscuro) */}
-                        <div className="relative z-10 text-center mt-12 mb-auto w-full flex flex-col items-center">
-                            <h1 className="text-2xl font-black text-white leading-none mb-1 drop-shadow-md">{firstName}</h1>
-                            <h2 className="text-xl font-bold text-blue-400 leading-tight drop-shadow-md">{lastName}</h2>
-
-                            {/* LÍNEA SEPARADORA (DETALLE 1) */}
-                            <div className="w-12 h-1 bg-blue-500 rounded-full my-3"></div>
-                            
-                            {/* Badge ROL con ICONO (DETALLE 2) */}
-                            <span className="inline-flex items-center gap-1.5 bg-slate-800 border border-slate-600 text-white px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-lg">
-                                <Icon name="Shield" size={10} className="text-blue-400" />
-                                {role}
-                            </span>
+                        {/* Datos Texto */}
+                        <div className="relative z-10 text-center mt-12 mb-auto w-full">
+                            <h1 className="text-2xl font-black text-white leading-none mb-1 tracking-tight">{firstName}</h1>
+                            <h2 className="text-xl font-bold text-blue-500 leading-tight mb-3">{lastName}</h2>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">{role}</p>
                         </div>
 
                         {/* Footer ID y QR */}
-                        <div className="relative z-10 w-full bg-white/5 rounded-xl p-2.5 border border-white/10 flex items-center justify-between backdrop-blur-sm mt-2">
-                            <div className="text-left pl-1">
-                                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">ID ÚNICO</p>
-                                <p className="text-[10px] font-mono font-bold text-white tracking-widest uppercase">{id}</p>
-                                <p className="text-[7px] font-bold text-blue-400 uppercase mt-0.5 tracking-wider">CDS MI CASA</p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                {/* ELEMENTO DECORATIVO ESQUINA (DETALLE 3) */}
-                                <Icon name="Award" size={16} className="text-blue-500 opacity-50" />
-                                <div className="bg-white p-1 rounded-md">
-                                    <img src={qrUrl} className="w-10 h-10" alt="QR" crossOrigin="anonymous"/>
+                        <div className="relative z-10 w-full bg-slate-800/50 rounded-xl p-3 border border-slate-700/50 flex items-center justify-between mt-2">
+                            <div className="text-left">
+                                <p className="text-[7px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">ID ÚNICO</p>
+                                <p className="text-[11px] font-mono font-bold text-white tracking-widest uppercase">{id}</p>
+                                {/* Elemento decorativo tipo logo barras */}
+                                <div className="flex gap-1 mt-1.5">
+                                    <div className="w-1.5 h-3 bg-white skew-x-[-10deg] opacity-80"></div>
+                                    <div className="w-1.5 h-3 bg-blue-600 skew-x-[-10deg]"></div>
+                                    <div className="w-6 h-0.5 bg-blue-600 self-end mb-0.5"></div>
                                 </div>
+                            </div>
+                            <div className="bg-white p-1 rounded-lg">
+                                <img src={qrUrl} className="w-11 h-11" alt="QR" crossOrigin="anonymous"/>
                             </div>
                         </div>
                     </div>
@@ -268,67 +273,59 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
         // DORSO (AZUL OSCURO SÓLIDO)
         return (
             <div className={`w-full h-full ${DARK_BG} relative overflow-hidden flex flex-col p-6 font-sans text-white`}>
-                <div className={`absolute inset-0 ${DARK_BG} z-0`}></div>
                 
-                <div className="relative z-10 text-center mb-6 mt-4">
-                    <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-2 text-blue-400 border border-white/10 shadow-lg">
-                        <Icon name="User" size={22}/>
+                {/* Header Dorso */}
+                <div className="relative z-10 text-center mb-6 mt-4 flex flex-col items-center">
+                    <div className="w-12 h-12 rounded-full border-2 border-slate-700 flex items-center justify-center mb-2 shadow-[0_0_15px_rgba(37,99,235,0.3)]">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
                     </div>
-                    <h3 className="font-bold text-white text-base tracking-wide uppercase">Contacto</h3>
+                    <h3 className="font-bold text-white text-sm tracking-[0.2em] uppercase">Información</h3>
                 </div>
 
                 <div className="relative z-10 flex-1 space-y-4">
-                    <div className="bg-slate-800/50 p-4 rounded-xl border border-white/10 space-y-3 backdrop-blur-sm">
-                        <div className="flex items-center gap-3 border-b border-white/5 pb-2">
-                            <div className="text-blue-400"><Icon name="Phone" size={14}/></div>
-                            <div className="flex-1">
-                                <p className="text-[8px] text-slate-400 uppercase font-bold">Teléfono</p>
-                                <p className="text-sm font-mono">{m.phone || 'No registrado'}</p>
-                            </div>
+                    {/* Info Box */}
+                    <div className="bg-slate-800/40 p-5 rounded-2xl border border-slate-700 space-y-4">
+                        <div>
+                            <p className="text-[8px] text-blue-500 uppercase font-bold mb-0.5 tracking-wider">Teléfono</p>
+                            <p className="text-sm font-medium text-slate-200">{m.phone || 'No registrado'}</p>
                         </div>
-                        <div className="flex items-center gap-3 border-b border-white/5 pb-2">
-                            <div className="text-blue-400"><Icon name="Mail" size={14}/></div>
-                            <div className="flex-1">
-                                <p className="text-[8px] text-slate-400 uppercase font-bold">Email</p>
-                                <p className="text-xs truncate">{m.email || 'No registrado'}</p>
-                            </div>
+                        <div>
+                            <p className="text-[8px] text-blue-500 uppercase font-bold mb-0.5 tracking-wider">Email</p>
+                            <p className="text-xs font-medium text-slate-200 truncate">{m.email || 'No registrado'}</p>
                         </div>
-                        <div className="flex items-center gap-3">
-                            <div className="text-blue-400"><Icon name="MapPin" size={14}/></div>
-                            <div className="flex-1 cursor-pointer" onClick={(e)=>{e.stopPropagation(); openMaps(m.address)}}>
-                                <p className="text-[8px] text-slate-400 uppercase font-bold">Dirección</p>
-                                <p className="text-xs leading-tight underline decoration-slate-600">{m.address || 'No registrada'}</p>
-                            </div>
+                        <div onClick={(e)=>{e.stopPropagation(); openMaps(m.address)}} className="cursor-pointer group">
+                            <p className="text-[8px] text-blue-500 uppercase font-bold mb-0.5 tracking-wider">Dirección</p>
+                            <p className="text-xs font-medium text-slate-200 leading-tight group-hover:text-white transition-colors">{m.address || 'No registrada'}</p>
                         </div>
+                        {(m.emergencyContact) && (
+                            <div className="pt-3 border-t border-slate-700/50">
+                                <p className="text-[8px] text-red-400 font-bold uppercase mb-0.5 tracking-wider">Emergencia</p>
+                                <div className="flex justify-between items-end">
+                                    <span className="text-xs font-bold text-white">{m.emergencyContact}</span>
+                                    <span className="text-[10px] text-slate-400">{m.emergencyPhone}</span>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
-                    {(m.emergencyContact || m.emergencyPhone) && (
-                        <div className="bg-red-900/20 p-3 rounded-xl border border-red-500/20 flex items-center gap-3">
-                            <div className="text-red-400"><Icon name="AlertTriangle" size={16}/></div>
-                            <div>
-                                <p className="text-[8px] text-red-300 font-bold uppercase mb-0.5">Emergencia</p>
-                                <p className="text-xs font-bold text-white">{m.emergencyContact}</p>
-                                <p className="text-xs text-red-200 font-mono">{m.emergencyPhone}</p>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Botones de Acción */}
-                    <div className="grid grid-cols-2 gap-3 mt-auto">
-                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(m.phone)}} className="col-span-2 w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg border border-emerald-400/30">
-                            <Icon name="MessageCircle" size={16} /> Enviar WhatsApp
-                        </button>
-                        <button onClick={(e)=>{e.stopPropagation(); makeCall(m.phone)}} className="bg-blue-600/30 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all">
+                    {/* Botón Principal */}
+                    <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(m.phone)}} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/20">
+                        <Icon name="MessageCircle" size={16} /> Enviar WhatsApp
+                    </button>
+                    
+                    {/* Botones Secundarios */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={(e)=>{e.stopPropagation(); makeCall(m.phone)}} className="bg-slate-800 hover:bg-slate-700 text-blue-400 border border-slate-700 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all">
                             <Icon name="Phone" size={14} /> Llamar
                         </button>
-                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp('5491136278857', `Hola, soy ${firstName}, quiero agendar una visita.`)}} className="bg-slate-700/50 hover:bg-slate-600 text-slate-300 border border-slate-500/30 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all">
-                            <Icon name="Calendar" size={14} /> Visita
+                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp('5491136278857', `Hola, soy ${firstName}, quiero agendar una visita.`)}} className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all">
+                            <Icon name="Calendar" size={14} /> Visita Pastoral
                         </button>
                     </div>
                 </div>
                 
-                <div className="mt-auto text-center pt-3 border-t border-white/10 relative z-10">
-                    <p className="text-[8px] text-slate-500">CDS MI CASA • {year}</p>
+                <div className="mt-auto text-center pt-4 border-t border-slate-800 relative z-10">
+                    <p className="text-[7px] text-slate-500 font-bold tracking-widest">CDS MI CASA • {year}</p>
                 </div>
             </div>
         );
@@ -374,21 +371,52 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
             <Modal isOpen={isEditing} onClose={()=>setIsEditing(false)} title={form.id ? "Editar Miembro" : "Nuevo Miembro"}>
                 <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
                     <Input label="Link Foto (Drive o URL)" value={form.photo} onChange={e=>setForm({...form, photo:e.target.value})} placeholder="https://..." />
+                    
                     <div className="grid grid-cols-2 gap-3">
                         <Input label="Nombre Completo" value={form.name} onChange={e=>setForm({...form, name:e.target.value})} />
+                        
                         <div className="space-y-1">
                             <label className="text-xs font-bold text-slate-500 uppercase">Rol</label>
                             <Select value={form.role} onChange={e=>setForm({...form, role:e.target.value})}>
-                                <option>Miembro</option><option>Líder</option><option>Pastor</option><option>Músico</option><option>Maestro</option><option>Servidor</option>
+                                {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                             </Select>
                         </div>
                     </div>
-                    <Input label="Área / Ministerio" value={form.ministry} onChange={e=>setForm({...form, ministry:e.target.value})} placeholder="Ej: Alabanza, Jóvenes..." />
+
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase flex justify-between">
+                            Área / Ministerio
+                            {userProfile?.role === 'Pastor' && !isAddingArea && (
+                                <button onClick={()=>setIsAddingArea(true)} className="text-brand-600 hover:underline text-[10px] flex items-center gap-1">
+                                    <Icon name="Plus" size={10}/> Nueva
+                                </button>
+                            )}
+                        </label>
+                        
+                        {isAddingArea ? (
+                            <div className="flex gap-2">
+                                <input className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-brand-500" 
+                                       placeholder="Nombre nueva área..." 
+                                       value={newAreaName} 
+                                       onChange={e=>setNewAreaName(e.target.value)} 
+                                       autoFocus
+                                />
+                                <button onClick={handleAddCustomArea} className="bg-brand-600 text-white px-4 rounded-xl font-bold">OK</button>
+                                <button onClick={()=>setIsAddingArea(false)} className="bg-slate-200 text-slate-500 px-3 rounded-xl"><Icon name="X" size={14}/></button>
+                            </div>
+                        ) : (
+                            <Select value={form.ministry} onChange={e=>setForm({...form, ministry:e.target.value})}>
+                                {DEFAULT_AREAS.concat(customAreas).map(a => <option key={a} value={a}>{a}</option>)}
+                            </Select>
+                        )}
+                    </div>
+
                     <div className="grid grid-cols-2 gap-3">
                         <Input label="Teléfono" value={form.phone} onChange={e=>setForm({...form, phone:e.target.value})} />
                         <Input label="Email" type="email" value={form.email} onChange={e=>setForm({...form, email:e.target.value})} />
                     </div>
                     <Input label="Dirección" value={form.address} onChange={e=>setForm({...form, address:e.target.value})} />
+                    
                     <div className="pt-4 border-t border-slate-100">
                         <p className="text-xs font-bold text-slate-400 uppercase mb-2">Emergencia</p>
                         <div className="grid grid-cols-2 gap-3">
@@ -418,12 +446,12 @@ window.Views.Directory = ({ members, addData, updateData, deleteData }) => {
                     <div className="relative z-10 animate-enter flex flex-col items-center gap-6">
                         <div className="perspective-1000 w-[320px] h-[520px] cursor-pointer group select-none relative" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
                             <div className={`relative w-full h-full duration-700 transform-style-3d transition-all ${isFlipped ? 'rotate-y-180' : ''}`}>
-                                {/* Frente */}
+                                {/* Frente - Fondo Sólido Blanco */}
                                 <div className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden bg-white border border-slate-200">
                                     <CardContent m={selectedMember} isFront={true} />
                                     <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-slate-400 flex items-center gap-1 z-50 bg-white/20 px-2 py-0.5 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
                                 </div>
-                                {/* Dorso */}
+                                {/* Dorso - Fondo Sólido Oscuro */}
                                 <div className="absolute w-full h-full backface-hidden rotate-y-180 rounded-[24px] shadow-2xl overflow-hidden bg-[#0f172a] border border-slate-800">
                                     <CardContent m={selectedMember} isFront={false} />
                                 </div>
