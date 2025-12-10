@@ -45,7 +45,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
         return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=0f172a&color=cbd5e1&size=512&font-size=0.33`;
     };
 
-    // ID ESTABLE: Usa el credentialId guardado O genera uno basado en el ID de Firebase (nunca cambia)
+    // ID ESTABLE
     const getStableID = (m) => {
         if (m.credentialId) return m.credentialId;
         const suffix = m.id ? m.id.slice(0, 4).toUpperCase() : 'TEMP';
@@ -69,14 +69,13 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
         window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`, '_blank');
     };
 
-    // --- ACCIÓN DE VISITA (NUEVO) ---
+    // --- ACCIÓN DE VISITA ---
     const handleScheduleVisit = (member) => {
-        // Guardamos el miembro en una variable temporal global para que Visits.js lo lea al cargar
         window.tempVisitMember = member;
         if (setActiveTab) {
-            setActiveTab('visits'); // Cambiamos de pestaña
+            setActiveTab('visits');
         } else {
-            Utils.notify("Error: Navegación no disponible", "error");
+            Utils.notify("Navegación no disponible", "error");
         }
     };
 
@@ -129,7 +128,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
             emergencyPhone: form.emergencyPhone,
             photo: form.photo,
             joinedDate: form.joinedDate,
-            credentialId: form.credentialId || getStableID({ ...form, id: form.id || Date.now().toString() }) // Generar si no existe
+            credentialId: form.credentialId || getStableID({ ...form, id: form.id || Date.now().toString() })
         };
 
         if (form.id) {
@@ -171,7 +170,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                 if (!worker || typeof worker !== 'function') {
                     await new Promise((resolve, reject) => {
                         const script = document.createElement('script');
-                        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+                        script.src = '[https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js](https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js)';
                         script.onload = resolve;
                         script.onerror = () => reject("Error al cargar script PDF");
                         document.head.appendChild(script);
@@ -228,7 +227,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                         <p className="text-[9px] font-bold text-slate-800 mt-0.5">{year}</p>
                     </div>
 
-                    {/* FOTO CENTRAL CON EFECTO DE CORTE (BORDE BLANCO GRUESO) */}
+                    {/* FOTO CENTRAL CON EFECTO DE CORTE */}
                     <div className="absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-30">
                         <div className="w-[140px] h-[140px] rounded-full border-[8px] border-white bg-white shadow-xl overflow-hidden">
                             <img src={photo} className="w-full h-full object-cover rounded-full bg-slate-200" alt={m.name} crossOrigin="anonymous"/>
@@ -321,7 +320,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                         </button>
                         
                         {/* BOTÓN VISITA PASTORAL CONECTADO */}
-                        {['Pastor', 'Líder', 'Servidor'].includes(userProfile.role) && (
+                        {['Pastor', 'Líder', 'Servidor'].includes(userProfile?.role) && (
                             <button onClick={(e)=>{e.stopPropagation(); handleScheduleVisit(m)}} className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all">
                                 <Icon name="Calendar" size={14} /> Visita Pastoral
                             </button>
@@ -338,7 +337,6 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
 
     return (
         <div className="space-y-6 fade-in pb-24 font-sans text-slate-800">
-            {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="flex items-center gap-3">
                     <h2 className="text-2xl font-extrabold text-slate-800">Directorio</h2>
@@ -355,7 +353,6 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                 </div>
             </div>
 
-            {/* Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {filteredMembers.map(member => (
                     <div key={member.id} className="group bg-white p-3 rounded-2xl shadow-sm border border-slate-100 hover:shadow-lg transition-all flex items-center gap-3 relative">
@@ -376,7 +373,6 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                 ))}
             </div>
 
-            {/* Modal CRUD */}
             <Modal isOpen={isEditing} onClose={()=>setIsEditing(false)} title={form.id ? "Editar Miembro" : "Nuevo Miembro"}>
                 <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
                     <Input label="Link Foto (Drive o URL)" value={form.photo} onChange={e=>setForm({...form, photo:e.target.value})} placeholder="https://..." />
@@ -441,26 +437,22 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                 </div>
             </Modal>
 
-            {/* PDF OCULTO (PLANO) */}
             {selectedMember && (
                 <div ref={printRef} style={{ display: 'none', width: '340px', height: '540px' }}>
                     <CardContent m={selectedMember} isFront={true} />
                 </div>
             )}
 
-            {/* Modal CREDENCIAL (3D) */}
             {selectedMember && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-md transition-opacity" onClick={() => setSelectedMember(null)}></div>
                     <div className="relative z-10 animate-enter flex flex-col items-center gap-6">
                         <div className="perspective-1000 w-[320px] h-[520px] cursor-pointer group select-none relative" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
                             <div className={`relative w-full h-full duration-700 transform-style-3d transition-all ${isFlipped ? 'rotate-y-180' : ''}`}>
-                                {/* Frente */}
                                 <div className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden bg-white border border-slate-200">
                                     <CardContent m={selectedMember} isFront={true} />
                                     <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-slate-400 flex items-center gap-1 z-50 bg-white/20 px-2 py-0.5 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
                                 </div>
-                                {/* Dorso */}
                                 <div className="absolute w-full h-full backface-hidden rotate-y-180 rounded-[24px] shadow-2xl overflow-hidden bg-[#0f172a] border border-slate-800">
                                     <CardContent m={selectedMember} isFront={false} />
                                 </div>
@@ -490,6 +482,3 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
         </div>
     );
 };
-```
-
----
