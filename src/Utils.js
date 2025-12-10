@@ -2,32 +2,39 @@
     window.Utils = window.Utils || {};
     const { useState, useEffect, useRef } = React;
 
-    // --- MANEJO SEGURO DE FECHAS (FIX ZONA HORARIA) ---
-    // Convierte "YYYY-MM-DD" a objeto Date local sin restar horas
-    const parseLocalDate = (dateStr) => {
-        if (!dateStr) return new Date();
-        const [y, m, d] = dateStr.split('-').map(Number);
-        return new Date(y, m - 1, d);
+    // --- TOASTS ---
+    let toastListener = null;
+    const notify = (msg, type = 'success') => {
+        if (toastListener) toastListener(msg, type);
+        else console.log("Toast:", msg);
     };
 
-    const formatDate = (dateStr, fmt = 'short') => {
-        if(!dateStr) return '';
-        const date = parseLocalDate(dateStr);
-        if(fmt === 'long') return date.toLocaleDateString('es-AR', { weekday:'long', day: 'numeric', month: 'long' });
-        if(fmt === 'month') return date.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
-        // short
-        return date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const ToastContainer = () => {
+        const [toasts, setToasts] = useState([]);
+        useEffect(() => {
+            const h = (e) => { 
+                const t = e.detail; 
+                setToasts(p => [...p, t]); 
+                setTimeout(() => setToasts(p => p.filter(i => i.id !== t.id)), 3000); 
+            };
+            window.addEventListener('app-toast', h);
+            toastListener = (m, t) => window.dispatchEvent(new CustomEvent('app-toast', { detail: { message: m, type: t, id: Date.now() } }));
+            return () => { window.removeEventListener('app-toast', h); toastListener = null; };
+        }, []);
+        if (!toasts.length) return null;
+        return (
+            <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
+                {toasts.map(t => (
+                    <div key={t.id} className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm font-bold animate-enter ${t.type === 'error' ? 'bg-white border-red-100 text-red-600' : 'bg-slate-900 border-slate-800 text-white'}`}>
+                        {t.message}
+                    </div>
+                ))}
+            </div>
+        );
     };
 
-    const getLocalDate = () => {
-        const d = new Date();
-        const offset = d.getTimezoneOffset() * 60000;
-        return new Date(d.getTime() - offset).toISOString().split('T')[0];
-    };
-
-    // --- COMPONENTES ---
+    // --- ICONOS ---
     const Icon = ({ name, size = 20, className = "" }) => {
-        // Iconos Feather (Mismos de siempre)
         const icons = {
             Home: <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>,
             Menu: <React.Fragment><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></React.Fragment>,
@@ -79,7 +86,8 @@
             RotateCw: <React.Fragment><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></React.Fragment>,
             ArrowRight: <React.Fragment><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></React.Fragment>,
             ArrowUp: <React.Fragment><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></React.Fragment>,
-            Award: <React.Fragment><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></React.Fragment>
+            Award: <React.Fragment><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></React.Fragment>,
+            Send: <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
         };
         return (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -88,22 +96,16 @@
         );
     };
 
-    // --- TOASTS ---
-    const ToastContainer = () => {
-        const [toasts, setToasts] = useState([]);
-        useEffect(() => {
-            const h = (e) => { const t = e.detail; setToasts(p => [...p, t]); setTimeout(() => setToasts(p => p.filter(i => i.id !== t.id)), 3000); };
-            window.addEventListener('app-toast', h); return () => window.removeEventListener('app-toast', h);
-        }, []);
-        if(!toasts.length) return null;
-        return (<div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">{toasts.map(t => (<div key={t.id} className={`toast-enter pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm font-bold ${t.type === 'error' ? 'bg-white border-red-100 text-red-600' : 'bg-slate-900 border-slate-800 text-white'}`}><Icon name={t.type === 'error' ? 'AlertCircle' : 'Check'} size={18} /> {t.message}</div>))}</div>);
+    // --- HELPERS LÓGICOS EXPORTADOS ---
+    const parseLocalDate = (dateStr) => {
+        if (!dateStr) return new Date();
+        const [y, m, d] = dateStr.split('-').map(Number);
+        return new Date(y, m - 1, d);
     };
 
-    const notify = (message, type = 'success') => window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type, id: Date.now() } }));
-
-    // --- UTILS ---
-    const formatTime = (t) => t ? t : '--:--';
     const formatCurrency = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 }).format(val);
+
+    const formatTime = (t) => t ? t : '--:--';
 
     const compressImage = (file) => {
         return new Promise((resolve, reject) => {
@@ -129,7 +131,7 @@
         });
     };
 
-    // --- COMPONENTES INPUTS ---
+    // --- COMPONENTES UI ---
     const Button = ({ children, onClick, variant = 'primary', icon, className = "", disabled=false, size='md' }) => {
         const v = { primary: "bg-brand-600 text-white hover:bg-brand-700 shadow-glow", secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50", danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100" };
         const s = { sm: "px-3 py-1.5 text-xs", md: "px-5 py-3 text-sm" };
@@ -182,6 +184,6 @@
     window.Utils = { 
         ...window.Utils, 
         Icon, Button, Input, Modal, Select, DateFilter, SmartSelect, ToastContainer, notify, 
-        formatCurrency, formatDate, getLocalDate, compressImage, Card, Badge, parseLocalDate
+        formatCurrency, formatDate, formatTime, getLocalDate, compressImage, Card, Badge, parseLocalDate
     };
 })();
