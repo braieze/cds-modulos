@@ -87,7 +87,8 @@
             ArrowRight: <React.Fragment><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></React.Fragment>,
             ArrowUp: <React.Fragment><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></React.Fragment>,
             Award: <React.Fragment><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></React.Fragment>,
-            Send: <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            // --- CORRECCIÓN AQUÍ: Agregado Fragment para Send ---
+            Send: <React.Fragment><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></React.Fragment>
         };
         return (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -96,7 +97,8 @@
         );
     };
 
-    // --- HELPERS LÓGICOS EXPORTADOS ---
+    // --- HELPERS LÓGICOS ---
+    // Agregada función segura para fechas
     const parseLocalDate = (dateStr) => {
         if (!dateStr) return new Date();
         const [y, m, d] = dateStr.split('-').map(Number);
@@ -131,7 +133,7 @@
         });
     };
 
-    // --- COMPONENTES UI ---
+    // --- COMPONENTES INPUTS ---
     const Button = ({ children, onClick, variant = 'primary', icon, className = "", disabled=false, size='md' }) => {
         const v = { primary: "bg-brand-600 text-white hover:bg-brand-700 shadow-glow", secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50", danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100" };
         const s = { sm: "px-3 py-1.5 text-xs", md: "px-5 py-3 text-sm" };
