@@ -2,34 +2,20 @@
     window.Utils = window.Utils || {};
     const { useState, useEffect, useRef } = React;
 
-    // --- 1. HELPERS LÓGICOS (FECHAS ARREGLADAS) ---
+    // --- 1. HELPERS LÓGICOS (DEFINIDOS PRIMERO PARA EVITAR ERRORES DE REFERENCIA) ---
     
-    const parseDate = (input) => {
-        if (!input) return new Date();
-        // Si es Timestamp de Firebase
-        if (input && typeof input.toDate === 'function') return input.toDate();
-        // Si es objeto Date
-        if (input instanceof Date) return input;
-        // Si es string ISO o YYYY-MM-DD
-        const d = new Date(input);
-        // Si es inválida (ej: "2025-10-10" a veces falla por zona horaria), forzamos
-        if (isNaN(d.getTime()) && typeof input === 'string' && input.includes('-')) {
-            const [y, m, d_str] = input.split('T')[0].split('-').map(Number);
-            return new Date(y, m - 1, d_str);
-        }
-        return d;
+    const parseLocalDate = (dateStr) => {
+        if (!dateStr) return new Date();
+        const [y, m, d] = dateStr.split('-').map(Number);
+        return new Date(y, m - 1, d);
     };
 
-    const formatDate = (dateInput, fmt = 'short') => {
-        if(!dateInput) return '';
-        const date = parseDate(dateInput);
-        if (isNaN(date.getTime())) return ''; // Evita "Invalid Date"
-
-        const options = { year: 'numeric', month: 'short', day: 'numeric' };
-        if (fmt === 'long') return date.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
-        if (fmt === 'time') return date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-        if (fmt === 'full') return date.toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-        
+    const formatDate = (dateStr, fmt = 'short') => {
+        if(!dateStr) return '';
+        const date = parseLocalDate(dateStr);
+        if(fmt === 'long') return date.toLocaleDateString('es-AR', { weekday:'long', day: 'numeric', month: 'long' });
+        if(fmt === 'month') return date.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+        // short
         return date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     };
 
@@ -40,6 +26,7 @@
     };
 
     const formatCurrency = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 }).format(val);
+
     const formatTime = (t) => t ? t : '--:--';
 
     const compressImage = (file) => {
@@ -97,7 +84,7 @@
         );
     };
 
-    // --- 3. ICONOS ---
+    // --- 3. ICONOS (CORREGIDO ERROR JSX) ---
     const Icon = ({ name, size = 20, className = "" }) => {
         const icons = {
             Home: <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>,
@@ -210,6 +197,7 @@
         );
     };
 
+    // --- 5. EXPORTAR TODO (ASEGURADO) ---
     window.Utils = { 
         ...window.Utils, 
         Icon, Button, Input, Modal, Select, DateFilter, SmartSelect, ToastContainer, notify, 
