@@ -187,7 +187,7 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
     }, [chartData, tabView]);
 
     // Helpers
-    const handleUnlock = (e) => { e.preventDefault(); if (pinInput === '1234') { setIsLocked(false); setErrorPin(false); } else { setErrorPin(true); setPinInput(''); } };
+    const handleUnlock = (e) => { e.preventDefault(); if (pinInput === '2367') { setIsLocked(false); setErrorPin(false); } else { setErrorPin(true); setPinInput(''); } };
     const handleImage = async (e) => { const f=e.target.files[0]; if(!f)return; setIsUploading(true); try{const b=await compressImage(f); setForm(p=>({...p, attachmentUrl:b}));}catch(err){Utils.notify("Error subida","error");} setIsUploading(false); };
     
     const handleSave = () => { 
