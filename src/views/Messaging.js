@@ -11,15 +11,19 @@ window.Views.Messaging = ({ userProfile }) => {
     const [members, setMembers] = useState([]);
     const [groups, setGroups] = useState([]);
     
-    // UI
-    const [selectedChat, setSelectedChat] = useState(null);
-    const [selectedBroadcast, setSelectedBroadcast] = useState(null);
+    // UI - SELECCIÓN POR ID (CLAVE PARA REACTIVIDAD)
+    const [selectedChatId, setSelectedChatId] = useState(null); 
+    const [selectedBroadcastId, setSelectedBroadcastId] = useState(null);
+    
     const [isComposeOpen, setIsComposeOpen] = useState(false);
     const [imageModal, setImageModal] = useState(null);
     const [viewersModal, setViewersModal] = useState(null);
     const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
-    const [chatInfoModal, setChatInfoModal] = useState(null); // Nuevo: Para ver integrantes del grupo
+    const [chatInfoModal, setChatInfoModal] = useState(null);
     const [searchTerm, setSearchTerm] = useState("");
+    
+    // PAGINACIÓN DIFUSIÓN
+    const [visibleBroadcasts, setVisibleBroadcasts] = useState(6);
 
     // Formularios
     const initialCompose = { 
@@ -54,32 +58,27 @@ window.Views.Messaging = ({ userProfile }) => {
         return () => { unsubMsg(); unsubMem(); unsubGroups(); };
     }, []);
 
+    // Scroll al fondo al cambiar chat
     useEffect(() => {
         if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }, [selectedChat]);
+    }, [selectedChatId, messages]);
 
     // --- HELPERS ---
-    const getMemberName = (id) => {
-        if (id === userProfile.id) return 'Tú';
-        const m = members.find(x => x.id === id);
-        return m ? m.name : 'Usuario';
-    };
-
     const getGroupMembers = (chat) => {
         if (!chat) return [];
-        // Lógica para obtener miembros según el tipo de chat
         if (chat.chatId && chat.chatId.startsWith('group:')) {
              const gName = chat.chatId.split(':')[1];
-             // Filtrar miembros por ministerio
              return members.filter(m => m.ministry === gName || m.role === 'Pastor');
         }
         if (chat.chatId && chat.chatId.startsWith('custom:')) {
             const gId = chat.chatId.split(':')[1];
-            const grp = groups.find(g => g.id === gId);
+            const grp = chat.groupData || groups.find(g => g.id === gId);
             if (grp) return members.filter(m => grp.members.includes(m.id));
         }
         return [];
     };
+
+    const getChatTitle = (chat) => chat?.title || 'Chat';
 
     // --- ACCIONES ---
     const handleImage = async (e) => {
@@ -111,22 +110,18 @@ window.Views.Messaging = ({ userProfile }) => {
         if (composeForm.context === 'custom_group') recipient = `custom:${composeForm.to}`;
         if (composeForm.context === 'broadcast') recipient = 'all';
 
-        // Validaciones
-        if (composeForm.context !== 'broadcast' && !composeForm.to) return Utils.notify("Selecciona destinatario", "error");
-        if (composeForm.type === 'poll' && composeForm.pollOptions.some(o=>!o.trim())) return Utils.notify("Opciones vacías", "error");
-
-        const isPrayer = composeForm.type === 'prayer';
+        const finalCategory = composeForm.type === 'prayer' ? 'Oración' : composeForm.category;
 
         const msgData = {
             from: userProfile.id,
             fromName: userProfile.name,
             to: recipient,
             type: composeForm.type,
-            category: isPrayer ? 'Oración' : composeForm.category, // Forzar categoría Oración
+            category: finalCategory, 
             content: composeForm.content,
             body: composeForm.body,
             isPinned: composeForm.isPinned,
-            allowReplies: isPrayer ? true : composeForm.allowReplies, // Oración siempre permite comentarios
+            allowReplies: composeForm.type === 'prayer' ? true : composeForm.allowReplies,
             attachmentUrl: composeForm.attachmentUrl,
             attachmentType: 'image',
             linkUrl: composeForm.linkUrl,
@@ -142,7 +137,7 @@ window.Views.Messaging = ({ userProfile }) => {
             if (composeForm.id) {
                 await window.db.collection('messages').doc(composeForm.id).update(msgData);
                 Utils.notify("Actualizado");
-                setSelectedBroadcast(null); 
+                setSelectedBroadcastId(null);
             } else {
                 await window.db.collection('messages').add(msgData);
                 Utils.notify("Enviado");
@@ -163,7 +158,6 @@ window.Views.Messaging = ({ userProfile }) => {
                 createdAt: new Date().toISOString()
             });
 
-            // Mensaje automático para inicializar
             await window.db.collection('messages').add({
                 from: userProfile.id,
                 fromName: 'Sistema',
@@ -183,30 +177,51 @@ window.Views.Messaging = ({ userProfile }) => {
         } catch (e) { console.error(e); }
     };
 
-    const handleBroadcastReply = async () => {
-        if (!replyText.trim() || !selectedBroadcast) return;
-        const reply = { id: Date.now(), from: userProfile.id, fromName: userProfile.name, content: replyText, date: new Date().toISOString() };
-        await window.db.collection('messages').doc(selectedBroadcast.id).update({
-            replies: firebase.firestore.FieldValue.arrayUnion(reply)
-        });
-        setReplyText("");
-        // Optimistic UI
-        setSelectedBroadcast(prev => ({ ...prev, replies: [...(prev.replies||[]), reply] }));
+    // ELIMINAR MENSAJE
+    const handleDeleteMessage = async (id, ownerId) => {
+        if (isAdmin || ownerId === userProfile.id) {
+            if(confirm("¿Eliminar mensaje?")) {
+                await window.db.collection('messages').doc(id).delete();
+                // Si estoy viendo el broadcast que borré, cerrarlo
+                if (selectedBroadcastId === id) setSelectedBroadcastId(null);
+                Utils.notify("Mensaje eliminado");
+            }
+        } else {
+            Utils.notify("No tienes permiso", "error");
+        }
     };
 
-    const handleChatReply = async () => {
-        if (!replyText.trim() || !selectedChat) return;
-        const newMessage = {
-            from: userProfile.id, fromName: userProfile.name,
-            to: selectedChat.id || selectedChat.chatId, 
-            content: replyText, type: 'text', date: new Date().toISOString(),
-            readBy: [userProfile.id], replies: [], reactions: {}
-        };
-        if (activeTab === 'direct') newMessage.to = selectedChat.id;
-        try {
-            await window.db.collection('messages').add(newMessage);
-            setReplyText("");
-        } catch(e) { console.error(e); }
+    // ELIMINAR CHAT COMPLETO
+    const handleDeleteChat = async (chat) => {
+        if (!chat) return;
+        if(confirm("¿Eliminar este chat y todos sus mensajes? Esta acción no se puede deshacer.")) {
+            // Borrar todos los mensajes del chat
+            const batch = window.db.batch();
+            chat.msgs.forEach(m => {
+                const ref = window.db.collection('messages').doc(m.id);
+                batch.delete(ref);
+            });
+            
+            // Si es grupo custom, borrar el grupo también
+            if (chat.chatId.startsWith('custom:')) {
+                 const gId = chat.chatId.split(':')[1];
+                 const groupRef = window.db.collection('groups').doc(gId);
+                 batch.delete(groupRef);
+            }
+
+            await batch.commit();
+            setSelectedChatId(null);
+            Utils.notify("Chat eliminado");
+        }
+    };
+
+    const handleReaction = async (msgId, emoji) => {
+        const msg = messages.find(m => m.id === msgId);
+        if (!msg) return;
+        const current = msg.reactions || {};
+        if (current[userProfile.id] === emoji) delete current[userProfile.id];
+        else current[userProfile.id] = emoji;
+        await window.db.collection('messages').doc(msgId).update({ reactions: current });
     };
 
     const handleVote = async (msgId, idx) => {
@@ -222,31 +237,34 @@ window.Views.Messaging = ({ userProfile }) => {
         const msg = messages.find(m => m.id === msgId);
         if (!msg) return;
         const prayed = msg.prayedBy || [];
-        // Toggle oración
         const newPrayed = prayed.includes(userProfile.id) ? prayed.filter(id => id !== userProfile.id) : [...prayed, userProfile.id];
         await window.db.collection('messages').doc(msgId).update({ prayedBy: newPrayed });
         Utils.notify(prayed.includes(userProfile.id) ? "Quitaste tu oración" : "Oraste por esto 🙏");
     };
-    
-    const handleReaction = async (msgId, emoji) => {
-        const msg = messages.find(m => m.id === msgId);
-        if (!msg) return;
-        const current = msg.reactions || {};
-        if (current[userProfile.id] === emoji) delete current[userProfile.id];
-        else current[userProfile.id] = emoji;
-        await window.db.collection('messages').doc(msgId).update({ reactions: current });
-    };
 
-    const handleDelete = async (id, ownerId) => {
-        if (isAdmin || ownerId === userProfile.id) {
-            if(confirm("¿Eliminar mensaje?")) {
-                await window.db.collection('messages').doc(id).delete();
-                if (selectedBroadcast?.id === id) setSelectedBroadcast(null);
-                Utils.notify("Eliminado");
-            }
-        } else {
-            Utils.notify("No tienes permiso", "error");
+    const handleReply = async (isBroadcast, msgId) => {
+        if (!replyText.trim()) return;
+        
+        // Si es difusión, usamos update arrayUnion en el doc original
+        if (isBroadcast) {
+             const reply = { id: Date.now(), from: userProfile.id, fromName: userProfile.name, content: replyText, date: new Date().toISOString() };
+             await window.db.collection('messages').doc(msgId).update({
+                replies: firebase.firestore.FieldValue.arrayUnion(reply)
+            });
+        } 
+        // Si es chat, creamos nuevo mensaje en la colección
+        else {
+             if (!selectedChat) return; // selectedChat lo obtenemos del memo abajo
+             const newMessage = {
+                from: userProfile.id, fromName: userProfile.name,
+                to: selectedChat.id || selectedChat.chatId, 
+                content: replyText, type: 'text', date: new Date().toISOString(),
+                readBy: [userProfile.id], replies: [], reactions: {}
+            };
+            if (activeTab === 'direct') newMessage.to = selectedChat.id;
+            await window.db.collection('messages').add(newMessage);
         }
+        setReplyText("");
     };
 
     const handleEditMessage = (msg) => {
@@ -267,14 +285,13 @@ window.Views.Messaging = ({ userProfile }) => {
             isPinned: msg.isPinned || false,
             allowReplies: msg.allowReplies !== false,
             attachmentUrl: msg.attachmentUrl || '',
-            attachmentType: msg.attachmentType || 'image',
             linkUrl: msg.linkUrl || '',
             pollOptions: msg.pollOptions ? msg.pollOptions.map(o => o.text) : ['', '']
         });
         setIsComposeOpen(true);
     };
 
-    // --- FILTRADO ---
+    // --- FILTRADO Y AGRUPACIÓN (CORAZÓN DE LA REACTIVIDAD) ---
     const categorizedMessages = useMemo(() => {
         const matchesSearch = (msg) => {
             if (!searchTerm) return true;
@@ -305,10 +322,9 @@ window.Views.Messaging = ({ userProfile }) => {
             if (msg.to.startsWith('custom:')) {
                 const gId = msg.to.split(':')[1];
                 const grp = groups.find(g => g.id === gId);
-                // Mostrar si es miembro
                 if ((grp && grp.members.includes(userProfile.id)) || msg.from === userProfile.id) {
                     const title = grp ? grp.name : 'Grupo';
-                    if (!customGroups[msg.to]) customGroups[msg.to] = { id: msg.to, chatId: msg.to, title: title, msgs: [], groupData: grp }; // Guardamos groupData para Info
+                    if (!customGroups[msg.to]) customGroups[msg.to] = { id: msg.to, chatId: msg.to, title: title, msgs: [], groupData: grp }; 
                     customGroups[msg.to].msgs.push(msg);
                 }
                 return;
@@ -324,7 +340,6 @@ window.Views.Messaging = ({ userProfile }) => {
             }
         });
         
-        // Agregar grupos vacíos creados pero sin mensajes (punto 2)
         groups.forEach(g => {
             if (g.members.includes(userProfile.id)) {
                 const key = `custom:${g.id}`;
@@ -342,6 +357,20 @@ window.Views.Messaging = ({ userProfile }) => {
 
         return { broadcasts, ministries: sortChats(ministries), groups: sortChats(customGroups), directs: sortChats(directs) };
     }, [messages, userProfile, members, groups, searchTerm]);
+
+    // DERIVAR SELECCIONES EN TIEMPO REAL
+    const selectedChat = useMemo(() => {
+        if (!selectedChatId) return null;
+        // Buscar en todas las listas
+        const allChats = [...categorizedMessages.ministries, ...categorizedMessages.groups, ...categorizedMessages.directs];
+        return allChats.find(c => c.chatId === selectedChatId || c.id === selectedChatId);
+    }, [selectedChatId, categorizedMessages]);
+
+    const selectedBroadcast = useMemo(() => {
+        if (!selectedBroadcastId) return null;
+        return categorizedMessages.broadcasts.find(b => b.id === selectedBroadcastId);
+    }, [selectedBroadcastId, categorizedMessages]);
+
 
     // --- ESTILOS VISUALES ---
     const getCoverStyle = (category) => {
@@ -364,56 +393,63 @@ window.Views.Messaging = ({ userProfile }) => {
     // --- RENDER ---
     
     const renderBroadcastView = () => (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-enter p-1">
-            {categorizedMessages.broadcasts.map(msg => (
-                <div key={msg.id} onClick={() => setSelectedBroadcast(msg)} className="bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden cursor-pointer group hover:shadow-lg transition-all relative h-auto flex flex-col">
-                    
-                    {/* PORTADA */}
-                    <div className="h-32 relative overflow-hidden shrink-0 bg-slate-100">
-                         {msg.attachmentUrl && msg.attachmentType === 'image' ? (
-                            <div onClick={(e)=>{e.stopPropagation(); setImageModal(msg.attachmentUrl)}} className="w-full h-full">
-                                <img src={msg.attachmentUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
-                            </div>
-                        ) : (
-                            <div className={`w-full h-full bg-gradient-to-br ${getCoverStyle(msg.category || 'General')} flex flex-col items-center justify-center text-white p-4 text-center relative`}>
-                                <div className="bg-white/20 p-2 rounded-full backdrop-blur-md mb-1 shadow-lg relative z-10">
-                                    <Icon name={getCoverIcon(msg.category)} size={28} />
-                                </div>
-                                <span className="text-[10px] font-black uppercase tracking-[0.2em] bg-black/20 px-3 py-1 rounded-lg border border-white/10 relative z-10">{msg.category || 'GENERAL'}</span>
-                            </div>
-                        )}
-                        {msg.isPinned && <div className="absolute top-2 right-2 bg-yellow-400 text-yellow-900 p-1 rounded-full shadow-sm z-10"><Icon name="Bell" size={12} className="fill-current"/></div>}
-                    </div>
-                    
-                    <div className="p-4 flex-1 flex flex-col gap-1">
-                        <div className="flex justify-between items-center mb-1">
-                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{formatDate(msg.date)}</span>
-                             {msg.type === 'poll' && <Badge type="brand">ENCUESTA</Badge>}
-                             {msg.type === 'prayer' && <Badge type="warning">ORACIÓN</Badge>}
+        <div className="space-y-6 animate-enter">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-1">
+                {categorizedMessages.broadcasts.slice(0, visibleBroadcasts).map(msg => (
+                    <div key={msg.id} onClick={() => setSelectedBroadcastId(msg.id)} className={`rounded-2xl shadow-soft border border-slate-100 overflow-hidden cursor-pointer group hover:shadow-lg transition-all relative flex flex-col h-auto ${msg.type === 'prayer' ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}>
+                        {/* PORTADA */}
+                        <div className={`h-32 relative overflow-hidden shrink-0 ${msg.type === 'prayer' ? 'bg-amber-100 flex items-center justify-center' : ''}`}>
+                             {msg.type === 'prayer' ? (
+                                <Icon name="Smile" size={40} className="text-amber-500 opacity-50"/>
+                             ) : (
+                                 msg.attachmentUrl && msg.attachmentType === 'image' ? (
+                                    <img src={msg.attachmentUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                                ) : (
+                                    <div className={`w-full h-full bg-gradient-to-br ${getCoverStyle(msg.category || 'General')} flex flex-col items-center justify-center text-white p-4 text-center relative`}>
+                                        <div className="bg-white/20 p-2 rounded-full backdrop-blur-md mb-1 shadow-lg relative z-10">
+                                            <Icon name={getCoverIcon(msg.category)} size={24} />
+                                        </div>
+                                        <span className="text-[10px] font-black uppercase tracking-[0.2em] bg-black/20 px-2 py-0.5 rounded border border-white/10 relative z-10">{msg.category || 'GENERAL'}</span>
+                                    </div>
+                                )
+                             )}
+                            {msg.isPinned && <div className="absolute top-2 right-2 bg-yellow-400 text-yellow-900 p-1 rounded-full shadow-sm z-10"><Icon name="Bell" size={12} className="fill-current"/></div>}
                         </div>
-                        <h3 className="font-extrabold text-lg text-slate-900 leading-tight mb-1 line-clamp-2">{msg.content}</h3>
-                        <p className="text-sm text-slate-500 line-clamp-2 mb-2">{msg.body || 'Ver detalles...'}</p>
                         
-                        {/* BARRA REACCIONES EN TARJETA */}
-                        <div className="flex items-center justify-between border-t border-slate-50 pt-2 mt-auto">
-                            <div className="flex -space-x-1 items-center">
-                                {Object.entries(msg.reactions||{}).slice(0,3).map(([k,v],i)=><span key={i} className="text-xs bg-slate-100 rounded-full px-1.5 border border-white h-5 flex items-center">{v}</span>)}
-                                <button 
-                                    onClick={(e)=>{e.stopPropagation(); handleReaction(msg.id, '❤️')}} 
-                                    className="w-6 h-6 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-red-50 hover:text-red-500 ml-1 border border-dashed border-slate-300 transition-colors"
-                                >
-                                    <Icon name="Plus" size={10}/>
-                                </button>
+                        <div className="p-4 flex-1 flex flex-col gap-1">
+                            <div className="flex justify-between items-center mb-1">
+                                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{formatDate(msg.date)}</span>
+                                 {msg.type === 'poll' && <Badge type="brand">ENCUESTA</Badge>}
+                                 {msg.type === 'prayer' && <Badge type="warning">ORACIÓN</Badge>}
                             </div>
-                            {msg.type === 'prayer' ? (
-                                <span className="text-xs font-bold text-amber-600 flex items-center gap-1">🙏 {msg.prayedBy?.length || 0}</span>
-                            ) : (
+                            <h3 className="font-extrabold text-lg text-slate-900 leading-tight mb-1 line-clamp-2">{msg.content}</h3>
+                            <p className="text-sm text-slate-500 line-clamp-2 mb-2">{msg.body || 'Ver detalles...'}</p>
+                            
+                            {/* REACCIONES VISIBLES EN TARJETA */}
+                            <div className="flex items-center justify-between border-t border-slate-50 pt-2 mt-auto">
+                                <div className="flex gap-2">
+                                    {['❤️','🙏','🔥'].map(em => {
+                                        const count = Object.values(msg.reactions||{}).filter(v=>v===em).length;
+                                        if(count === 0 && !msg.reactions?.[userProfile.id]===em) return null;
+                                        return (
+                                            <span key={em} className="text-xs bg-slate-100 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+                                                {em} <span className="font-bold text-slate-600">{count}</span>
+                                            </span>
+                                        );
+                                    })}
+                                    <span className="text-[10px] text-slate-400 flex items-center gap-1 ml-1"><Icon name="Eye" size={10}/> {msg.readBy?.length || 0}</span>
+                                </div>
                                 <span className="text-xs font-bold text-brand-600 flex items-center gap-1 group-hover:translate-x-1 transition-transform">Abrir <Icon name="ArrowRight" size={12}/></span>
-                            )}
+                            </div>
                         </div>
                     </div>
+                ))}
+            </div>
+            {categorizedMessages.broadcasts.length > visibleBroadcasts && (
+                <div className="text-center pt-4">
+                    <button onClick={()=>setVisibleBroadcasts(p=>p+6)} className="text-sm font-bold text-slate-500 hover:text-brand-600 underline">Ver más mensajes antiguos</button>
                 </div>
-            ))}
+            )}
         </div>
     );
 
@@ -427,18 +463,19 @@ window.Views.Messaging = ({ userProfile }) => {
                         const lastMsg = chat.msgs[0]; 
                         const isUnread = !lastMsg?.readBy?.includes(userProfile.id);
                         return (
-                            <div key={chat.chatId||chat.id} onClick={()=>setSelectedChat(chat)} className={`p-4 border-b border-slate-100 cursor-pointer hover:bg-white transition-colors flex gap-3 items-center ${selectedChat?.id===chat.id?'bg-white border-l-4 border-l-brand-500':'border-l-4 border-l-transparent'}`}>
+                            <div key={chat.chatId||chat.id} onClick={()=>setSelectedChatId(chat.chatId || chat.id)} className={`p-4 border-b border-slate-100 cursor-pointer hover:bg-white transition-colors flex gap-3 items-center ${selectedChat?.id===chat.id?'bg-white border-l-4 border-l-brand-500':'border-l-4 border-l-transparent'}`}>
                                 <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold shrink-0 ${chat.color || 'bg-slate-200 text-slate-500'}`}>
                                     {chat.icon ? <Icon name={chat.icon}/> : chat.title.charAt(0)}
                                 </div>
                                 <div className="flex-1 overflow-hidden">
                                     <h4 className="font-bold text-sm text-slate-800 truncate">{chat.title}</h4>
-                                    <p className="text-xs text-slate-500 truncate">{lastMsg ? (lastMsg.content || 'Adjunto') : 'Sin mensajes'}</p>
+                                    <p className="text-xs text-slate-500 truncate">{chat.msgs[0]?.content || '...'}</p>
                                 </div>
                                 {isUnread && lastMsg && <div className="w-2.5 h-2.5 bg-brand-600 rounded-full"></div>}
                             </div>
                         );
                     })}
+                    {chatList.length === 0 && <div className="p-10 text-center text-slate-400 text-sm">No hay chats.</div>}
                 </div>
             </div>
 
@@ -447,16 +484,15 @@ window.Views.Messaging = ({ userProfile }) => {
                     <>
                         <div className="p-3 bg-white border-b flex justify-between items-center shadow-sm z-10">
                             <div className="flex items-center gap-3">
-                                <button onClick={()=>setSelectedChat(null)} className="md:hidden text-slate-500"><Icon name="ChevronLeft"/></button>
+                                <button onClick={()=>setSelectedChatId(null)} className="md:hidden text-slate-500"><Icon name="ChevronLeft"/></button>
                                 <h3 className="font-bold text-slate-800">{selectedChat.title}</h3>
                             </div>
                             <div className="flex gap-2">
-                                {/* Botón Info Grupo (Punto 2) */}
-                                {(selectedChat.chatId.startsWith('group:') || selectedChat.chatId.startsWith('custom:')) && (
+                                {(selectedChat.chatId?.startsWith('group') || selectedChat.chatId?.startsWith('custom')) && 
                                     <button onClick={()=>setChatInfoModal(selectedChat)} className="text-slate-400 hover:text-brand-600"><Icon name="Info" size={18}/></button>
-                                )}
+                                }
                                 {(isAdmin || selectedChat.msgs?.[0]?.from === userProfile.id) && 
-                                    <button onClick={()=>handleDelete(selectedChat.id, selectedChat.msgs?.[0]?.from)} className="text-red-400 hover:text-red-600"><Icon name="Trash" size={18}/></button>
+                                    <button onClick={()=>handleDeleteChat(selectedChat)} className="text-red-400 hover:text-red-600"><Icon name="Trash" size={18}/></button>
                                 }
                             </div>
                         </div>
@@ -471,6 +507,7 @@ window.Views.Messaging = ({ userProfile }) => {
                                         
                                         <p className="whitespace-pre-wrap">{msg.content}</p>
 
+                                        {/* ENCUESTA VISIBLE EN CHAT */}
                                         {msg.type === 'poll' && (
                                             <div className="space-y-2 mt-2">
                                                 {msg.pollOptions.map((opt, i) => {
@@ -478,16 +515,12 @@ window.Views.Messaging = ({ userProfile }) => {
                                                     const total = msg.pollOptions.reduce((a,b)=>a+(b.votes?.length||0),0);
                                                     const pct = total ? Math.round((votes/total)*100) : 0;
                                                     const voted = opt.votes?.includes(userProfile.id);
-                                                    // Color destacado si votaste (Punto 1)
-                                                    const barColor = voted ? 'bg-brand-500' : 'bg-black/10';
-                                                    const textColor = voted ? 'text-brand-700 font-bold' : 'text-slate-700';
-
                                                     return (
                                                         <div key={i} onClick={()=>handleVote(msg.id, i)} className={`relative p-2 rounded border cursor-pointer overflow-hidden ${voted ? 'border-brand-500 bg-brand-50' : 'bg-black/5 border-transparent'}`}>
-                                                            <div className={`absolute left-0 top-0 bottom-0 ${barColor} transition-all duration-500`} style={{width:`${pct}%`, opacity: voted ? 0.2 : 1}}></div>
-                                                            <div className={`relative flex justify-between items-center z-10 ${textColor}`}>
-                                                                <span className="text-xs font-medium">{opt.text}</span>
-                                                                <span className="text-[10px]">{pct}%</span>
+                                                            <div className={`absolute left-0 top-0 bottom-0 ${voted ? 'bg-brand-200' : 'bg-black/10'}`} style={{width:`${pct}%`}}></div>
+                                                            <div className="relative flex justify-between items-center z-10">
+                                                                <span className={`text-xs ${voted ? 'font-bold text-brand-800' : 'font-medium'}`}>{opt.text}</span>
+                                                                <span className="text-[10px] font-bold">{pct}%</span>
                                                             </div>
                                                         </div>
                                                     );
@@ -495,22 +528,22 @@ window.Views.Messaging = ({ userProfile }) => {
                                             </div>
                                         )}
 
-                                        {msg.type === 'link' && (
-                                            <div className="mt-2 bg-black/5 p-2 rounded">
-                                                <p className="text-xs italic mb-1">{msg.body}</p>
-                                                <a href={msg.linkUrl} target="_blank" className="block text-xs underline truncate text-blue-600">{msg.linkUrl}</a>
-                                            </div>
-                                        )}
+                                        {msg.type === 'link' && <a href={msg.linkUrl} target="_blank" className="block mt-2 text-xs underline truncate bg-black/10 p-2 rounded">{msg.linkUrl}</a>}
 
                                         <div className="flex justify-between items-center mt-2 pt-1 border-t border-white/10 gap-3">
-                                            <div className="flex gap-1">{Object.entries(msg.reactions||{}).slice(0,3).map(([k,v],i)=><span key={i} className="text-xs bg-white text-black rounded-full px-1 border border-slate-200">{v}</span>)}</div>
-                                            <div className="text-[9px] opacity-70 flex items-center gap-1">{formatDate(msg.date, 'time')} {msg.from === userProfile.id && (<span className="flex items-center cursor-pointer hover:opacity-100" onClick={()=>setViewersModal(msg)}><Icon name="Eye" size={10}/> {msg.readBy?.length}</span>)}</div>
+                                            <div className="flex gap-1">
+                                                {Object.entries(msg.reactions||{}).slice(0,3).map(([k,v],i)=><span key={i} className="text-xs bg-white text-black rounded-full px-1 border border-slate-200">{v}</span>)}
+                                            </div>
+                                            <div className="text-[9px] opacity-70 flex items-center gap-1">
+                                                {formatDate(msg.date, 'time')}
+                                                {msg.from === userProfile.id && (<span className="flex items-center cursor-pointer hover:opacity-100" onClick={()=>setViewersModal(msg)}><Icon name="Eye" size={10}/> {msg.readBy?.length}</span>)}
+                                            </div>
                                         </div>
 
-                                        {/* ACCIONES HOVER CHAT */}
+                                        {/* ACCIONES CHAT HOVER */}
                                         <div className="absolute -top-3 right-0 bg-white shadow-md rounded-full px-2 py-1 hidden group-hover:flex gap-1 scale-90 text-slate-800 z-20">
                                             {['👍','❤️','🙏','🔥'].map(em => <button key={em} onClick={()=>handleReaction(msg.id, em)}>{em}</button>)}
-                                            {(isAdmin || msg.from === userProfile.id) && <button onClick={()=>handleDelete(msg.id, msg.from)} className="text-red-500 px-1"><Icon name="Trash" size={12}/></button>}
+                                            {(isAdmin || msg.from === userProfile.id) && <button onClick={()=>handleDeleteMessage(msg.id, msg.from)} className="text-red-500 px-1"><Icon name="Trash" size={12}/></button>}
                                         </div>
                                     </div>
                                 </div>
@@ -518,8 +551,8 @@ window.Views.Messaging = ({ userProfile }) => {
                         </div>
 
                         <div className="p-3 bg-white flex gap-2 items-center">
-                            <input className="input-modern rounded-full flex-1 py-3" placeholder="Escribe un mensaje..." value={replyText} onChange={e=>setReplyText(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleChatReply()}/>
-                            <button onClick={handleChatReply} className="p-3 bg-brand-600 text-white rounded-full shadow-lg hover:scale-105 transition-transform"><Icon name="Send" size={18}/></button>
+                            <input className="input-modern rounded-full flex-1 py-3" placeholder="Escribe un mensaje..." value={replyText} onChange={e=>setReplyText(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleReply(false)}/>
+                            <button onClick={()=>handleReply(false)} className="p-3 bg-brand-600 text-white rounded-full shadow-lg hover:scale-105 transition-transform"><Icon name="Send" size={18}/></button>
                         </div>
                     </>
                 ) : <div className="flex-1 flex flex-col items-center justify-center text-slate-400"><Icon name="MessageCircle" size={64}/><p>Selecciona un chat</p></div>}
@@ -532,7 +565,7 @@ window.Views.Messaging = ({ userProfile }) => {
             <div className="flex flex-col md:flex-row justify-between items-center gap-4 flex-shrink-0">
                 <div className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200 overflow-x-auto w-full md:w-auto">
                     {[{id:'broadcast',label:'Difusión',icon:'Megaphone'},{id:'ministries',label:'Ministerios',icon:'Briefcase'},{id:'groups',label:'Grupos',icon:'Users'},{id:'direct',label:'Chats',icon:'MessageCircle'}].map(t=>(
-                        <button key={t.id} onClick={()=>{setActiveTab(t.id);setSelectedChat(null);}} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab===t.id?'bg-brand-50 text-brand-600 shadow-sm':'text-slate-500 hover:text-slate-700'}`}><Icon name={t.icon} size={16}/><span className="hidden md:inline">{t.label}</span></button>
+                        <button key={t.id} onClick={()=>{setActiveTab(t.id);setSelectedChatId(null);}} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab===t.id?'bg-brand-50 text-brand-600 shadow-sm':'text-slate-500 hover:text-slate-700'}`}><Icon name={t.icon} size={16}/><span className="hidden md:inline">{t.label}</span></button>
                     ))}
                 </div>
                 <div className="flex gap-2">
@@ -548,11 +581,10 @@ window.Views.Messaging = ({ userProfile }) => {
                 {activeTab === 'direct' && renderChatInterface(categorizedMessages.directs)}
             </div>
 
-            {/* MODAL LECTURA DIFUSIÓN */}
+            {/* MODAL LECTURA */}
             {selectedBroadcast && (
-                <Modal isOpen={!!selectedBroadcast} onClose={()=>setSelectedBroadcast(null)} title="Comunicado">
+                <Modal isOpen={!!selectedBroadcast} onClose={()=>setSelectedBroadcastId(null)} title="Comunicado">
                     <div className="space-y-6">
-                        {/* HEADER ESPECIAL: ORACIÓN */}
                         {selectedBroadcast.type === 'prayer' ? (
                             <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl text-center">
                                 <Icon name="Smile" size={32} className="mx-auto text-amber-600 mb-2"/>
@@ -560,11 +592,11 @@ window.Views.Messaging = ({ userProfile }) => {
                                 <p className="text-sm text-amber-700 font-medium mb-3">{selectedBroadcast.content}</p>
                                 <div className="bg-white p-3 rounded-lg border border-amber-100 text-sm text-slate-600 whitespace-pre-wrap">{selectedBroadcast.body}</div>
                                 <div className="mt-4">
-                                    <button onClick={()=>handlePray(selectedBroadcast.id)} className={`px-6 py-2 rounded-full font-bold transition-all ${selectedBroadcast.prayedBy?.includes(userProfile.id) ? 'bg-amber-600 text-white shadow-lg transform scale-105' : 'bg-white border border-amber-300 text-amber-600 hover:bg-amber-50'}`}>
-                                        🙏 {selectedBroadcast.prayedBy?.includes(userProfile.id) ? 'Oraste por esto' : 'Voy a orar por esto'}
+                                    <button onClick={()=>handlePray(selectedBroadcast.id)} className={`px-6 py-2 rounded-full font-bold transition-all ${selectedBroadcast.prayedBy?.includes(userProfile.id) ? 'bg-amber-600 text-white' : 'bg-white border border-amber-300 text-amber-600 hover:bg-amber-50'}`}>
+                                        🙏 {selectedBroadcast.prayedBy?.includes(userProfile.id) ? 'Ya oraste' : 'Orar por esto'}
                                     </button>
                                 </div>
-                                <p className="text-xs text-amber-600 mt-2">{selectedBroadcast.prayedBy?.length || 0} personas se unieron.</p>
+                                <p className="text-xs text-amber-600 mt-2">{selectedBroadcast.prayedBy?.length || 0} personas oraron.</p>
                             </div>
                         ) : (
                             <>
@@ -584,7 +616,6 @@ window.Views.Messaging = ({ userProfile }) => {
                                     
                                     {selectedBroadcast.type === 'link' && <a href={selectedBroadcast.linkUrl} target="_blank" className="mt-4 block bg-blue-50 border border-blue-200 p-4 rounded-xl text-center text-blue-700 font-bold hover:bg-blue-100">Abrir Enlace</a>}
 
-                                    {/* ENCUESTA EN MODAL */}
                                     {selectedBroadcast.type === 'poll' && (
                                         <div className="mt-4 space-y-2">
                                             {selectedBroadcast.pollOptions.map((opt, i) => {
@@ -594,8 +625,8 @@ window.Views.Messaging = ({ userProfile }) => {
                                                 const voted = opt.votes?.includes(userProfile.id);
                                                 return (
                                                     <div key={i} onClick={()=>handleVote(selectedBroadcast.id, i)} className={`relative p-3 rounded-xl border cursor-pointer overflow-hidden ${voted ? 'border-brand-500 bg-brand-50' : 'border-slate-200 bg-white'}`}>
-                                                        <div className="absolute left-0 top-0 bottom-0 bg-brand-200/50" style={{width:`${pct}%`}}></div>
-                                                        <div className="relative flex justify-between z-10 font-bold text-sm"><span>{opt.text}</span><span>{pct}%</span></div>
+                                                        <div className={`absolute left-0 top-0 bottom-0 ${voted ? 'bg-brand-200' : 'bg-slate-100'}`} style={{width:`${pct}%`}}></div>
+                                                        <div className={`relative flex justify-between z-10 text-sm ${voted?'font-bold text-brand-800':'font-medium'}`}><span>{opt.text}</span><span>{pct}%</span></div>
                                                     </div>
                                                 );
                                             })}
@@ -615,8 +646,8 @@ window.Views.Messaging = ({ userProfile }) => {
                         
                         {(isAdmin || selectedBroadcast.from === userProfile.id) && (
                             <div className="flex justify-end gap-2 mt-4 pt-2 border-t">
-                                <button onClick={()=>{handleEditMessage(selectedBroadcast); setSelectedBroadcast(null);}} className="text-xs text-blue-600 font-bold flex gap-1 items-center"><Icon name="Edit" size={12}/> Editar</button>
-                                <button onClick={()=>handleDelete(selectedBroadcast.id, selectedBroadcast.from)} className="text-xs text-red-600 font-bold flex gap-1 items-center"><Icon name="Trash" size={12}/> Eliminar</button>
+                                <button onClick={()=>{handleEditMessage(selectedBroadcast); setSelectedBroadcastId(null);}} className="text-xs text-blue-600 font-bold flex gap-1 items-center"><Icon name="Edit" size={12}/> Editar</button>
+                                <button onClick={()=>handleDeleteMessage(selectedBroadcast.id, selectedBroadcast.from)} className="text-xs text-red-600 font-bold flex gap-1 items-center"><Icon name="Trash" size={12}/> Eliminar</button>
                             </div>
                         )}
 
@@ -628,14 +659,13 @@ window.Views.Messaging = ({ userProfile }) => {
                                         <div key={i} className="bg-slate-50 p-2 rounded text-xs"><span className="font-bold text-slate-600">{r.fromName}: </span>{r.content}</div>
                                     ))}
                                 </div>
-                                <div className="flex gap-2"><input className="input-modern py-2 text-sm" placeholder="Comentar..." value={replyText} onChange={e=>setReplyText(e.target.value)}/><Button onClick={handleBroadcastReply} size="sm"><Icon name="Send"/></Button></div>
+                                <div className="flex gap-2"><input className="input-modern py-2 text-sm" placeholder="Comentar..." value={replyText} onChange={e=>setReplyText(e.target.value)}/><Button onClick={()=>handleReply(true, selectedBroadcast.id)} size="sm"><Icon name="Send"/></Button></div>
                             </div>
                         )}
                     </div>
                 </Modal>
             )}
 
-            {/* MODAL REDACTAR */}
             <Modal isOpen={isComposeOpen} onClose={()=>setIsComposeOpen(false)} title="Redactar">
                 <div className="space-y-5 max-h-[75vh] overflow-y-auto pr-1">
                     <div className="flex bg-slate-100 p-1 rounded-xl">{['text','poll','link','prayer'].map(t=><button key={t} onClick={()=>setComposeForm({...composeForm, type:t})} className={`flex-1 py-2 text-xs font-bold rounded-lg uppercase ${composeForm.type===t?'bg-white shadow text-brand-600':'text-slate-500'}`}>{t==='prayer'?'Oración':t}</button>)}</div>
@@ -664,8 +694,8 @@ window.Views.Messaging = ({ userProfile }) => {
 
                     {composeForm.type === 'poll' && (
                         <div className="bg-slate-50 p-3 rounded-xl border space-y-2">
-                            <label className="label-modern">Descripción</label>
-                            <textarea className="input-modern h-20 text-sm resize-none" placeholder="Contexto de la votación..." value={composeForm.body} onChange={e=>setComposeForm({...composeForm, body:e.target.value})}/>
+                            <label className="label-modern">Descripción (Opcional)</label>
+                            <textarea className="input-modern h-20 text-sm resize-none" value={composeForm.body} onChange={e=>setComposeForm({...composeForm, body:e.target.value})}/>
                             <label className="label-modern">Opciones</label>
                             {composeForm.pollOptions.map((opt, i) => <Input key={i} placeholder={`Opción ${i+1}`} value={opt} onChange={e=>{const n=[...composeForm.pollOptions];n[i]=e.target.value;setComposeForm({...composeForm, pollOptions:n})}}/>)}
                             <Button size="sm" variant="secondary" onClick={()=>setComposeForm(p=>({...p, pollOptions:[...p.pollOptions, '']}))}>+ Opción</Button>
@@ -673,17 +703,17 @@ window.Views.Messaging = ({ userProfile }) => {
                     )}
 
                     {composeForm.type === 'link' && (
-                        <div className="space-y-2">
+                        <>
                             <label className="label-modern mb-1">Descripción</label>
-                            <textarea className="input-modern h-20 text-sm resize-none" placeholder="De qué trata este link..." value={composeForm.body} onChange={e=>setComposeForm({...composeForm, body:e.target.value})}/>
-                            <Input label="URL" value={composeForm.linkUrl} onChange={e=>setComposeForm({...composeForm, linkUrl:e.target.value})} placeholder="https://..."/>
-                        </div>
+                            <textarea className="input-modern h-20 text-sm resize-none" value={composeForm.body} onChange={e=>setComposeForm({...composeForm, body:e.target.value})}/>
+                            <Input label="URL" value={composeForm.linkUrl} onChange={e=>setComposeForm({...composeForm, linkUrl:e.target.value})} placeholder="https://..." />
+                        </>
                     )}
 
                     {composeForm.context === 'broadcast' && (
                         <div className="flex items-center gap-4 pt-2 border-t mt-2">
-                            <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" checked={composeForm.isPinned} onChange={e=>setComposeForm({...composeForm, isPinned:e.target.checked})}/> Fijar Aviso</label>
-                            <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" checked={composeForm.allowReplies} onChange={e=>setComposeForm({...composeForm, allowReplies:e.target.checked})}/> Permitir Respuestas</label>
+                            <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" checked={composeForm.isPinned} onChange={e=>setComposeForm({...composeForm, isPinned:e.target.checked})}/> Fijar</label>
+                            <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" checked={composeForm.allowReplies} onChange={e=>setComposeForm({...composeForm, allowReplies:e.target.checked})}/> Respuestas</label>
                         </div>
                     )}
                     <Button className="w-full py-3" onClick={handleSend} disabled={isUploading}>Enviar</Button>
@@ -693,17 +723,7 @@ window.Views.Messaging = ({ userProfile }) => {
             <Modal isOpen={isGroupModalOpen} onClose={()=>setIsGroupModalOpen(false)} title="Nuevo Grupo"><div className="space-y-4"><Input label="Nombre" value={newGroupForm.name} onChange={e=>setNewGroupForm({...newGroupForm, name:e.target.value})}/><div className="max-h-40 overflow-y-auto border p-2 rounded">{members.map(m=><div key={m.id} onClick={()=>{const e=newGroupForm.members.includes(m.id);setNewGroupForm({...newGroupForm, members:e?newGroupForm.members.filter(x=>x!==m.id):[...newGroupForm.members,m.id]})}} className={`p-2 cursor-pointer flex justify-between ${newGroupForm.members.includes(m.id)?'bg-brand-50 text-brand-700':''}`}><span>{m.name}</span>{newGroupForm.members.includes(m.id)&&<Icon name="Check" size={14}/>}</div>)}</div><Button className="w-full" onClick={handleCreateGroup}>Crear</Button></div></Modal>
             <Modal isOpen={!!imageModal} onClose={()=>setImageModal(null)} title="Vista Previa"><div className="text-center"><img src={imageModal} className="max-h-[60vh] mx-auto rounded shadow mb-4"/><a href={imageModal} download="imagen.jpg" className="inline-block bg-brand-600 text-white px-4 py-2 rounded-full text-sm font-bold">Descargar</a></div></Modal>
             <Modal isOpen={!!viewersModal} onClose={()=>setViewersModal(null)} title="Visto por"><div className="max-h-60 overflow-y-auto space-y-1">{viewersModal?.readBy?.map((uid,i)=><div key={i} className="p-2 border-b text-sm text-slate-600">{members.find(m=>m.id===uid)?.name || 'Usuario'}</div>)}</div></Modal>
-            <Modal isOpen={!!chatInfoModal} onClose={()=>setChatInfoModal(null)} title="Info del Grupo">
-                <div className="space-y-2 max-h-60 overflow-y-auto">
-                    {getGroupMembers(chatInfoModal).map((m,i)=>(
-                        <div key={i} className="p-2 border-b flex justify-between">
-                            <span>{m.name}</span>
-                            <span className="text-xs text-slate-400">{m.role}</span>
-                        </div>
-                    ))}
-                    {getGroupMembers(chatInfoModal).length===0 && <p className="text-center text-slate-400">No se encontraron miembros.</p>}
-                </div>
-            </Modal>
+            <Modal isOpen={!!chatInfoModal} onClose={()=>setChatInfoModal(null)} title="Integrantes del Grupo"><div className="max-h-60 overflow-y-auto space-y-1">{getGroupMembers(chatInfoModal).map((m,i)=><div key={i} className="p-2 border-b text-sm text-slate-600">{m.name}</div>)}</div></Modal>
         </div>
     );
 };
