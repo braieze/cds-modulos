@@ -18,7 +18,7 @@ window.Views.Messaging = ({ userProfile }) => {
     
     const [isComposeOpen, setIsComposeOpen] = useState(false);
     const [imageModal, setImageModal] = useState(null);
-    const [viewersModal, setViewersModal] = useState(null); // Lista de vistos
+    const [viewersModal, setViewersModal] = useState(null);
     const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
     const [chatInfoModal, setChatInfoModal] = useState(null);
     const [searchTerm, setSearchTerm] = useState("");
@@ -33,8 +33,8 @@ window.Views.Messaging = ({ userProfile }) => {
     const initialCompose = { 
         id: null, 
         to: '', 
-        context: 'individual', // 'broadcast' | 'individual'
-        recipientType: 'member', // 'member' | 'ministry' | 'group' (NUEVO PARA CORREGIR ERROR 1)
+        context: 'individual', 
+        recipientType: 'member', 
         type: 'text', 
         category: 'General',
         content: '', 
@@ -45,7 +45,12 @@ window.Views.Messaging = ({ userProfile }) => {
         attachmentType: 'image', 
         pollOptions: ['', ''], 
         linkUrl: '', 
-        scheduledAt: '' // (NUEVO PARA CORREGIR ERROR 3)
+        linkTitle: '',
+        scheduledAt: '', // Fecha de envío programado (Sistema)
+        eventDate: '',   // Fecha del EVENTO real (Para el usuario) - NUEVO
+        hasEvent: false, // Chip activado - NUEVO
+        hasPoll: false,
+        hasLink: false
     };
     const [composeForm, setComposeForm] = useState(initialCompose);
     const [newGroupForm, setNewGroupForm] = useState({ name: '', members: [] });
@@ -63,6 +68,7 @@ window.Views.Messaging = ({ userProfile }) => {
     useEffect(() => {
         if (!window.db) return;
         
+        // Ordenamos por fecha descendente.
         const unsubMsg = window.db.collection('messages').orderBy('date', 'desc').limit(500).onSnapshot(snap => {
             setMessages(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
@@ -105,11 +111,22 @@ window.Views.Messaging = ({ userProfile }) => {
         return [];
     };
 
-    // Obtener lista única de ministerios para el select
     const uniqueMinistries = useMemo(() => {
         const mins = members.map(m => m.ministry).filter(Boolean);
         return [...new Set(mins)];
     }, [members]);
+
+    // Generador de Link de Google Calendar
+    const getGoogleCalendarLink = (msg) => {
+        if (!msg.eventDate) return '#';
+        const startDate = new Date(msg.eventDate);
+        const endDate = new Date(startDate.getTime() + (2 * 60 * 60 * 1000)); // Por defecto dura 2hs
+        
+        const formatGCal = (date) => date.toISOString().replace(/-|:|\.\d\d\d/g, "");
+        
+        const details = `Evento: ${msg.content}\n${msg.body || ''}`;
+        return `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(msg.content)}&dates=${formatGCal(startDate)}/${formatGCal(endDate)}&details=${encodeURIComponent(details)}&location=Iglesia`;
+    };
 
     // --- 5. FILTRADO Y AGRUPACIÓN ---
     const categorizedMessages = useMemo(() => {
@@ -173,7 +190,6 @@ window.Views.Messaging = ({ userProfile }) => {
             }
         });
         
-        // Agregar grupos vacíos
         groups.forEach(g => {
             if (g.members.includes(userProfile.id)) {
                 const key = `custom:${g.id}`;
@@ -183,11 +199,15 @@ window.Views.Messaging = ({ userProfile }) => {
             }
         });
 
+        // Ordenamiento estricto por fecha
         const sortChats = (chats) => Object.values(chats).sort((a,b) => {
             const dateA = a.msgs[0]?.date || a.groupData?.createdAt || 0;
             const dateB = b.msgs[0]?.date || b.groupData?.createdAt || 0;
             return new Date(dateB) - new Date(dateA);
         });
+
+        // Broadcasts también ordenados por fecha original (Firebase ya lo trae ordenado, pero aseguramos)
+        broadcasts.sort((a,b) => new Date(b.date) - new Date(a.date));
 
         return { broadcasts, ministries: sortChats(ministries), groups: sortChats(customGroups), directs: sortChats(directs) };
     }, [messages, userProfile, members, groups, searchTerm]);
@@ -235,14 +255,11 @@ window.Views.Messaging = ({ userProfile }) => {
         if (!composeForm.content) return Utils.notify("Falta el Título", "error");
         
         let recipient = composeForm.to;
-        // Lógica corregida de destinatarios (Error 1)
         if (composeForm.context === 'broadcast') {
             recipient = 'all';
         } else {
-            // Contexto individual/grupal
             if (composeForm.recipientType === 'group') recipient = `custom:${composeForm.to}`;
             else if (composeForm.recipientType === 'ministry') recipient = `group:${composeForm.to}`;
-            // Si es 'member', recipient ya es el ID
         }
 
         const finalCategory = composeForm.type === 'prayer' ? 'Oración' : composeForm.category;
@@ -260,17 +277,33 @@ window.Views.Messaging = ({ userProfile }) => {
             attachmentUrl: composeForm.attachmentUrl,
             attachmentType: composeForm.attachmentType || 'image',
             linkUrl: composeForm.linkUrl,
+            linkTitle: composeForm.linkTitle,
             pollOptions: composeForm.type === 'poll' ? composeForm.pollOptions.map(o => ({ text: o, votes: [] })) : [],
-            date: new Date().toISOString(),
-            scheduledAt: composeForm.scheduledAt || null, // Guardar fecha programada (Error 3)
+            
+            // Lógica corregida: Si es nuevo usamos Now(), si es editado NO TOCAMOS este campo abajo
+            date: new Date().toISOString(), 
+            
+            scheduledAt: composeForm.scheduledAt || null, 
+            eventDate: composeForm.hasEvent ? composeForm.eventDate : null, // NUEVO CAMPO EVENTO
+            
             readBy: [userProfile.id],
             replies: [],
             reactions: {},
-            prayedBy: []
+            prayedBy: [],
+            reminders: [] // NUEVO ARRAY PARA RECORDATORIOS
         };
 
         try {
             if (composeForm.id) {
+                // AL EDITAR: Eliminamos 'date' para NO sobrescribir la fecha original
+                delete msgData.date; 
+                // Mantenemos arrays existentes para no borrarlos al editar
+                delete msgData.readBy;
+                delete msgData.replies;
+                delete msgData.reactions;
+                delete msgData.prayedBy;
+                delete msgData.reminders;
+
                 await window.db.collection('messages').doc(composeForm.id).update(msgData);
                 Utils.notify("Actualizado");
                 setSelectedBroadcastId(null);
@@ -327,7 +360,6 @@ window.Views.Messaging = ({ userProfile }) => {
     };
 
     const handleEditMessage = (msg) => {
-        // Lógica de recuperación para edición
         let ctx = 'individual';
         let recType = 'member';
         let toVal = msg.to;
@@ -356,8 +388,13 @@ window.Views.Messaging = ({ userProfile }) => {
             attachmentUrl: msg.attachmentUrl || '',
             attachmentType: msg.attachmentType || 'image',
             linkUrl: msg.linkUrl || '',
+            linkTitle: msg.linkTitle || '',
             pollOptions: msg.pollOptions ? msg.pollOptions.map(o => o.text) : ['', ''],
-            scheduledAt: msg.scheduledAt || ''
+            scheduledAt: msg.scheduledAt || '',
+            eventDate: msg.eventDate || '',
+            hasEvent: !!msg.eventDate,
+            hasLink: !!msg.linkUrl,
+            hasPoll: !!msg.pollOptions && msg.pollOptions.length > 0
         });
         setIsComposeOpen(true);
     };
@@ -401,6 +438,15 @@ window.Views.Messaging = ({ userProfile }) => {
         const newPrayed = prayed.includes(userProfile.id) ? prayed.filter(id => id !== userProfile.id) : [...prayed, userProfile.id];
         await window.db.collection('messages').doc(msgId).update({ prayedBy: newPrayed });
         Utils.notify(prayed.includes(userProfile.id) ? "Quitaste tu oración" : "Oraste por esto 🙏");
+    };
+
+    const handleToggleReminder = async (msgId) => {
+        const msg = messages.find(m => m.id === msgId);
+        if (!msg) return;
+        const reminders = msg.reminders || [];
+        const newReminders = reminders.includes(userProfile.id) ? reminders.filter(id => id !== userProfile.id) : [...reminders, userProfile.id];
+        await window.db.collection('messages').doc(msgId).update({ reminders: newReminders });
+        Utils.notify(reminders.includes(userProfile.id) ? "Recordatorio quitado" : "Te recordaremos 1 día antes ⏰");
     };
 
     const handleBroadcastReply = async () => {
@@ -469,7 +515,6 @@ window.Views.Messaging = ({ userProfile }) => {
                          )}
                         {msg.isPinned && <div className="absolute top-2 right-2 bg-yellow-400 text-yellow-900 p-1 rounded-full shadow-sm z-10"><Icon name="Bell" size={12} className="fill-current"/></div>}
                         
-                        {/* BOTÓN EDITAR (Error 2) */}
                         {(isAdmin || msg.from === userProfile.id) && (
                             <div className="absolute top-2 left-2 flex gap-1 z-20">
                                 <button onClick={(e) => { e.stopPropagation(); handleEditMessage(msg); }} className="bg-white/90 p-1.5 rounded-full shadow hover:bg-white text-slate-700">
@@ -482,25 +527,34 @@ window.Views.Messaging = ({ userProfile }) => {
                     <div className="p-4 flex-1 flex flex-col gap-1">
                         <div className="flex justify-between items-center mb-1">
                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{formatDate(msg.date)}</span>
-                             {msg.type === 'poll' && <Badge type="brand">ENCUESTA</Badge>}
-                             {msg.type === 'prayer' && <Badge type="warning">ORACIÓN</Badge>}
+                             {/* CHIPS EN TARJETA */}
+                             <div className="flex gap-1">
+                                {msg.type === 'poll' && <Badge type="brand">ENCUESTA</Badge>}
+                                {msg.eventDate && <Badge type="brand" className="bg-purple-100 text-purple-700">EVENTO</Badge>}
+                                {msg.type === 'prayer' && <Badge type="warning">ORACIÓN</Badge>}
+                             </div>
                         </div>
                         <h3 className="font-extrabold text-lg text-slate-900 leading-tight mb-1 line-clamp-2">{msg.content}</h3>
                         <p className="text-sm text-slate-500 line-clamp-2 mb-2">{msg.body || 'Ver detalles...'}</p>
                         
-                        {/* BARRA REACCIONES (Error 4: ocultar si es 0) */}
+                        {/* FECHA EVENTO EN TARJETA */}
+                        {msg.eventDate && (
+                            <div className="flex items-center gap-2 text-xs font-bold text-purple-600 bg-purple-50 p-2 rounded-lg mb-2">
+                                <Icon name="Calendar" size={14}/> {formatDate(msg.eventDate, 'full')}
+                            </div>
+                        )}
+
                         <div className="flex items-center justify-between border-t border-slate-50 pt-2 mt-auto">
                             <div className="flex gap-2">
                                 {['❤️','🙏','🔥'].map(em => {
                                     const count = Object.values(msg.reactions||{}).filter(v=>v===em).length;
-                                    if(count === 0) return null; // CORRECCIÓN: Si es 0 no mostrar
+                                    if(count === 0) return null; 
                                     return (
                                         <span key={em} className="text-xs bg-slate-100 px-1.5 py-0.5 rounded-full flex items-center gap-1 border border-slate-200">
                                             {em} <span className="font-bold text-slate-600">{count}</span>
                                         </span>
                                     );
                                 })}
-                                {/* ERROR 4: Contador de vistos clicable */}
                                 <span className="text-[10px] text-slate-400 flex items-center gap-1 ml-1 cursor-pointer hover:text-brand-600" onClick={(e)=>{e.stopPropagation(); setViewersModal(msg);}}>
                                     <Icon name="Eye" size={10}/> {msg.readBy?.length || 0}
                                 </span>
@@ -518,10 +572,9 @@ window.Views.Messaging = ({ userProfile }) => {
         </div>
     );
 
-    // VISTA CHAT (Sin cambios mayores, solo integración)
+    // VISTA CHAT
     const renderChatInterface = (chatList) => (
         <div className="flex flex-1 gap-0 overflow-hidden bg-white rounded-2xl shadow-xl border border-slate-200 h-full animate-enter">
-            {/* Lista Chats */}
             <div className={`w-full md:w-80 border-r border-slate-100 flex flex-col bg-slate-50 ${selectedChatId ? 'hidden md:flex' : 'flex'}`}>
                 <div className="p-4 border-b border-slate-200 bg-white"><Input placeholder="Buscar chat..." className="py-2 text-sm rounded-xl" /></div>
                 <div className="flex-1 overflow-y-auto">
@@ -544,7 +597,6 @@ window.Views.Messaging = ({ userProfile }) => {
                 </div>
             </div>
 
-            {/* Area Chat */}
             <div className={`flex-1 flex flex-col bg-[#eef2f6] relative ${selectedChatId ? 'flex' : 'hidden md:flex'}`}>
                 {selectedChat ? (
                     <>
@@ -571,11 +623,8 @@ window.Views.Messaging = ({ userProfile }) => {
                                 <div key={msg.id} ref={el => messageRefs.current[msg.id] = el} className={`flex ${msg.from===userProfile.id?'justify-end':'justify-start'} ${highlightId===msg.id ? 'animate-pulse' : ''} group relative`}>
                                     <div className={`max-w-[80%] p-3 rounded-lg shadow-sm text-sm relative ${msg.from===userProfile.id?'bg-[#d9fdd3] text-slate-900':'bg-white'}`}>
                                         {msg.from!==userProfile.id && <p className="text-[10px] font-bold text-orange-600 mb-1">{msg.fromName}</p>}
-                                        
                                         {msg.attachmentUrl && <img src={msg.attachmentUrl} className="mb-2 rounded-lg max-h-60 object-cover cursor-pointer bg-black/10" onClick={()=>setImageModal(msg.attachmentUrl)}/>}
-                                        
                                         <p className="whitespace-pre-wrap">{msg.content}</p>
-
                                         {msg.type === 'link' && <a href={msg.linkUrl} target="_blank" className="block mt-2 text-xs underline truncate bg-black/10 p-2 rounded">{msg.linkUrl}</a>}
                                         
                                         {msg.type === 'poll' && (
@@ -600,7 +649,6 @@ window.Views.Messaging = ({ userProfile }) => {
                                             <div className="text-[9px] opacity-70 flex items-center gap-1">{formatDate(msg.date, 'time')} {msg.from === userProfile.id && <span className="flex items-center cursor-pointer hover:opacity-100" onClick={()=>setViewersModal(msg)}><Icon name="Eye" size={10}/> {msg.readBy?.length}</span>}</div>
                                         </div>
 
-                                        {/* ACCIONES CHAT HOVER */}
                                         <div className="absolute -top-3 right-0 bg-white shadow-md rounded-full px-2 py-1 hidden group-hover:flex gap-1 scale-90 text-slate-800 z-20">
                                             {['👍','❤️','🙏','🔥'].map(em => <button key={em} onClick={()=>handleReaction(msg.id, em)}>{em}</button>)}
                                             {(isAdmin || msg.from === userProfile.id) && <button onClick={()=>handleDeleteMessage(msg.id, msg.from)} className="text-red-500 px-1"><Icon name="Trash" size={12}/></button>}
@@ -645,6 +693,27 @@ window.Views.Messaging = ({ userProfile }) => {
             {selectedBroadcast && (
                 <Modal isOpen={!!selectedBroadcast} onClose={()=>setSelectedBroadcastId(null)} title="Comunicado">
                     <div className="space-y-6">
+                        {/* VISUALIZACIÓN FECHA Y ACCIONES DE CALENDARIO */}
+                        {selectedBroadcast.eventDate && (
+                            <div className="bg-purple-50 border border-purple-200 p-4 rounded-xl flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div className="flex items-center gap-3 text-purple-800">
+                                    <div className="bg-white p-2 rounded-lg shadow-sm"><Icon name="Calendar" size={24}/></div>
+                                    <div>
+                                        <h4 className="font-bold text-sm uppercase opacity-70">Fecha del Evento</h4>
+                                        <p className="font-extrabold text-lg">{formatDate(selectedBroadcast.eventDate, 'full')}</p>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <a href={getGoogleCalendarLink(selectedBroadcast)} target="_blank" className="px-4 py-2 bg-white border border-purple-300 text-purple-700 rounded-lg text-sm font-bold hover:bg-purple-100 flex items-center gap-2">
+                                        <Icon name="Plus" size={14}/> Google Cal
+                                    </a>
+                                    <button onClick={()=>handleToggleReminder(selectedBroadcast.id)} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 ${selectedBroadcast.reminders?.includes(userProfile.id) ? 'bg-purple-600 text-white' : 'bg-white border border-purple-300 text-purple-700 hover:bg-purple-50'}`}>
+                                        <Icon name="Bell" size={14}/> {selectedBroadcast.reminders?.includes(userProfile.id) ? 'Recordatorio Activo' : 'Recordarme'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
                         {selectedBroadcast.category === 'Oración' ? (
                             <div className="bg-amber-50 border border-amber-200 p-6 rounded-2xl text-center">
                                 <Icon name="Smile" size={40} className="mx-auto text-amber-600 mb-2"/>
@@ -673,7 +742,7 @@ window.Views.Messaging = ({ userProfile }) => {
                                     <h2 className="text-2xl font-extrabold text-slate-900 mb-2">{selectedBroadcast.content}</h2>
                                     <div className="prose prose-slate text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{selectedBroadcast.body}</div>
                                     
-                                    {selectedBroadcast.type === 'link' && <a href={selectedBroadcast.linkUrl} target="_blank" className="mt-4 block bg-blue-50 border border-blue-200 p-4 rounded-xl text-center text-blue-700 font-bold hover:bg-blue-100">Abrir Enlace</a>}
+                                    {selectedBroadcast.type === 'link' && <a href={selectedBroadcast.linkUrl} target="_blank" className="mt-4 block bg-blue-50 border border-blue-200 p-4 rounded-xl text-center text-blue-700 font-bold hover:bg-blue-100">{selectedBroadcast.linkTitle || 'Abrir Enlace'}</a>}
 
                                     {selectedBroadcast.pollOptions?.length > 0 && (
                                         <div className="mt-4 space-y-2">
@@ -695,7 +764,6 @@ window.Views.Messaging = ({ userProfile }) => {
                             </>
                         )}
                         
-                        {/* ERROR 5: BARRA DE REACCIONES DENTRO DEL MODAL (RECUPERADO) */}
                         <div className="flex items-center justify-between border-t border-b py-3 mt-4">
                              <div className="flex gap-4">
                                 {['👍','❤️','🙏','🔥'].map(em => (
@@ -743,7 +811,6 @@ window.Views.Messaging = ({ userProfile }) => {
                             </Select>
                         ) : (
                             <>
-                                {/* ERROR 1: SELECTOR DE TIPO (Persona, Ministerio, Grupo) */}
                                 <Select label="Tipo Destinatario" value={composeForm.recipientType} onChange={e=>setComposeForm({...composeForm, recipientType:e.target.value, to: ''})}>
                                     <option value="member">Persona</option>
                                     <option value="ministry">Ministerio</option>
@@ -763,17 +830,27 @@ window.Views.Messaging = ({ userProfile }) => {
                     <Input label="Título / Asunto" value={composeForm.content} onChange={e=>setComposeForm({...composeForm, content:e.target.value})}/>
                     <div><label className="label-modern mb-1">Cuerpo del mensaje</label><textarea className="input-modern h-32 text-sm resize-none" placeholder="Escribe aquí..." value={composeForm.body} onChange={e=>setComposeForm({...composeForm, body:e.target.value})}/></div>
                     
+                    {/* CHIPS DE FUNCIONALIDAD: ENCUESTA, ENLACE, EVENTO */}
                     <div className="flex flex-wrap gap-2">
-                        <button onClick={()=>setComposeForm(p=>({...p, hasPoll: !p.hasPoll}))} className={`px-3 py-1 rounded-full text-xs font-bold border ${composeForm.hasPoll?'bg-brand-600 text-white':'bg-white text-slate-500'}`}>Encuesta</button>
-                        <button onClick={()=>setComposeForm(p=>({...p, hasLink: !p.hasLink}))} className={`px-3 py-1 rounded-full text-xs font-bold border ${composeForm.hasLink?'bg-brand-600 text-white':'bg-white text-slate-500'}`}>Enlace</button>
+                        <button onClick={()=>setComposeForm(p=>({...p, hasPoll: !p.hasPoll}))} className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${composeForm.hasPoll?'bg-brand-600 text-white shadow-md':'bg-white text-slate-500'}`}>Encuesta</button>
+                        <button onClick={()=>setComposeForm(p=>({...p, hasLink: !p.hasLink}))} className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${composeForm.hasLink?'bg-brand-600 text-white shadow-md':'bg-white text-slate-500'}`}>Enlace</button>
+                        <button onClick={()=>setComposeForm(p=>({...p, hasEvent: !p.hasEvent}))} className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${composeForm.hasEvent?'bg-purple-600 text-white shadow-md':'bg-white text-slate-500'}`}>Evento</button>
                     </div>
 
                     {composeForm.hasPoll && <div className="bg-slate-50 p-3 rounded-xl border space-y-2"><label className="label-modern">Opciones Encuesta</label>{composeForm.pollOptions.map((opt, i) => <Input key={i} placeholder={`Opción ${i+1}`} value={opt} onChange={e=>{const n=[...composeForm.pollOptions];n[i]=e.target.value;setComposeForm({...composeForm, pollOptions:n})}}/>)}<Button size="sm" variant="secondary" onClick={()=>setComposeForm(p=>({...p, pollOptions:[...p.pollOptions, '']}))}>+ Opción</Button></div>}
                     
                     {composeForm.hasLink && <div className="space-y-2"><Input label="Título del Botón" value={composeForm.linkTitle} onChange={e=>setComposeForm({...composeForm, linkTitle:e.target.value})} placeholder="Ej: Unirme al Meet"/><Input label="URL (https://...)" value={composeForm.linkUrl} onChange={e=>setComposeForm({...composeForm, linkUrl:e.target.value})}/></div>}
 
-                    {/* ERROR 3: Fecha programada y eliminación de adjunto */}
-                    <Input type="datetime-local" label="Programar para (Opcional)" value={composeForm.scheduledAt} onChange={e=>setComposeForm({...composeForm, scheduledAt:e.target.value})}/>
+                    {/* INPUT DE EVENTO (NUEVO) */}
+                    {composeForm.hasEvent && (
+                        <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 animate-enter">
+                            <label className="label-modern text-purple-800">Fecha del Evento</label>
+                            <Input type="datetime-local" value={composeForm.eventDate} onChange={e=>setComposeForm({...composeForm, eventDate:e.target.value})}/>
+                            <p className="text-[10px] text-purple-600 mt-1">* Los usuarios verán opciones para agendar y recordatorios.</p>
+                        </div>
+                    )}
+
+                    <Input type="datetime-local" label="Programar Envío (Opcional - Sistema)" value={composeForm.scheduledAt} onChange={e=>setComposeForm({...composeForm, scheduledAt:e.target.value})}/>
 
                     <div className="flex gap-2 items-center">
                         <label className="flex-1 p-3 border rounded-xl flex justify-center items-center gap-2 cursor-pointer hover:bg-slate-50">
