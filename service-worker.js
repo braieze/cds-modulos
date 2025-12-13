@@ -1,8 +1,8 @@
-// --- 1. IMPORTAR LIBRERÍAS DE FIREBASE (Compat) ---
+// --- 1. IMPORTAR LIBRERÍAS DE FIREBASE ---
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
 
-// --- 2. CONFIGURACIÓN FIREBASE (Mismas credenciales que index.html) ---
+// --- 2. CONFIGURACIÓN FIREBASE ---
 firebase.initializeApp({
    apiKey: "AIzaSyDXK_EcXsFGhRmXfkKG8SMdsM69c4PNfHw",
    authDomain: "conquistadoresapp.firebaseapp.com",
@@ -21,20 +21,20 @@ messaging.onBackgroundMessage((payload) => {
   const notificationTitle = payload.notification.title;
   const notificationOptions = {
     body: payload.notification.body,
-    icon: '/icon-192.png', // Asegúrate de tener este icono o usa el enlace externo
-    badge: '/badge-icon.png', // Icono pequeño para la barra de estado (blanco y negro preferiblemente)
-    data: payload.data
+    icon: 'https://cdn-icons-png.flaticon.com/512/1909/1909849.png',
+    badge: 'https://cdn-icons-png.flaticon.com/512/1909/1909849.png'
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
-// --- 4. LÓGICA DE CACHÉ (Tu código original) ---
-const CACHE_NAME = 'conquistadores-v1';
+// --- 4. LÓGICA DE CACHÉ ---
+const CACHE_NAME = 'conquistadores-v2'; // Cambié a v2 para forzar actualización
 const urlsToCache = [
   './index.html',
   './src/Utils.js',
   './src/DataLogic.js',
+  './src/NotificationLogic.js', // ¡IMPORTANTE AGREGARLO!
   './src/views/Dashboard.js',
   './src/views/Directory.js',
   './src/views/Finances.js',
@@ -57,16 +57,8 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('fetch', event => {
-  // Ignorar peticiones a Firebase o APIs externas para no romper la app si fallan
-  if (event.request.url.includes('firebase') || event.request.url.includes('googleapis')) {
-     return; 
-  }
-
+  if (event.request.url.includes('firebase') || event.request.url.includes('googleapis')) return;
   event.respondWith(
-    caches.match(event.request)
-      .then(response => {
-        if (response) return response;
-        return fetch(event.request);
-      })
+    caches.match(event.request).then(response => response || fetch(event.request))
   );
 });
