@@ -43,14 +43,19 @@ window.Views.Messaging = ({ userProfile }) => {
         allowReplies: true, 
         attachmentUrl: '', 
         attachmentType: 'image', 
+        
+        // CHIPS Y EXTRAS
         pollOptions: ['', ''], 
+        hasPoll: false,
+        
         linkUrl: '', 
         linkTitle: '',
-        scheduledAt: '', // Fecha de envío programado (Sistema)
-        eventDate: '',   // Fecha del EVENTO real (Para el usuario) - NUEVO
-        hasEvent: false, // Chip activado - NUEVO
-        hasPoll: false,
-        hasLink: false
+        hasLink: false,
+
+        scheduledAt: '', 
+        eventDate: '',   
+        location: '', // NUEVO CAMPO UBICACIÓN
+        hasEvent: false
     };
     const [composeForm, setComposeForm] = useState(initialCompose);
     const [newGroupForm, setNewGroupForm] = useState({ name: '', members: [] });
@@ -68,7 +73,6 @@ window.Views.Messaging = ({ userProfile }) => {
     useEffect(() => {
         if (!window.db) return;
         
-        // Ordenamos por fecha descendente.
         const unsubMsg = window.db.collection('messages').orderBy('date', 'desc').limit(500).onSnapshot(snap => {
             setMessages(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
@@ -116,16 +120,14 @@ window.Views.Messaging = ({ userProfile }) => {
         return [...new Set(mins)];
     }, [members]);
 
-    // Generador de Link de Google Calendar
     const getGoogleCalendarLink = (msg) => {
         if (!msg.eventDate) return '#';
         const startDate = new Date(msg.eventDate);
-        const endDate = new Date(startDate.getTime() + (2 * 60 * 60 * 1000)); // Por defecto dura 2hs
-        
+        const endDate = new Date(startDate.getTime() + (2 * 60 * 60 * 1000)); 
         const formatGCal = (date) => date.toISOString().replace(/-|:|\.\d\d\d/g, "");
-        
+        const location = msg.location || 'Iglesia';
         const details = `Evento: ${msg.content}\n${msg.body || ''}`;
-        return `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(msg.content)}&dates=${formatGCal(startDate)}/${formatGCal(endDate)}&details=${encodeURIComponent(details)}&location=Iglesia`;
+        return `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(msg.content)}&dates=${formatGCal(startDate)}/${formatGCal(endDate)}&details=${encodeURIComponent(details)}&location=${encodeURIComponent(location)}`;
     };
 
     // --- 5. FILTRADO Y AGRUPACIÓN ---
@@ -199,14 +201,12 @@ window.Views.Messaging = ({ userProfile }) => {
             }
         });
 
-        // Ordenamiento estricto por fecha
         const sortChats = (chats) => Object.values(chats).sort((a,b) => {
             const dateA = a.msgs[0]?.date || a.groupData?.createdAt || 0;
             const dateB = b.msgs[0]?.date || b.groupData?.createdAt || 0;
             return new Date(dateB) - new Date(dateA);
         });
 
-        // Broadcasts también ordenados por fecha original (Firebase ya lo trae ordenado, pero aseguramos)
         broadcasts.sort((a,b) => new Date(b.date) - new Date(a.date));
 
         return { broadcasts, ministries: sortChats(ministries), groups: sortChats(customGroups), directs: sortChats(directs) };
@@ -276,28 +276,28 @@ window.Views.Messaging = ({ userProfile }) => {
             allowReplies: composeForm.allowReplies,
             attachmentUrl: composeForm.attachmentUrl,
             attachmentType: composeForm.attachmentType || 'image',
-            linkUrl: composeForm.linkUrl,
-            linkTitle: composeForm.linkTitle,
-            pollOptions: composeForm.type === 'poll' ? composeForm.pollOptions.map(o => ({ text: o, votes: [] })) : [],
             
-            // Lógica corregida: Si es nuevo usamos Now(), si es editado NO TOCAMOS este campo abajo
+            // CORRECCIÓN: Guardar Link y Poll basado en el CHIP, no en el Tipo
+            linkUrl: composeForm.hasLink ? composeForm.linkUrl : '',
+            linkTitle: composeForm.hasLink ? composeForm.linkTitle : '',
+            pollOptions: composeForm.hasPoll ? composeForm.pollOptions.map(o => ({ text: o, votes: [] })) : [],
+            
             date: new Date().toISOString(), 
             
             scheduledAt: composeForm.scheduledAt || null, 
-            eventDate: composeForm.hasEvent ? composeForm.eventDate : null, // NUEVO CAMPO EVENTO
+            eventDate: composeForm.hasEvent ? composeForm.eventDate : null,
+            location: composeForm.hasEvent ? composeForm.location : '', // NUEVO
             
             readBy: [userProfile.id],
             replies: [],
             reactions: {},
             prayedBy: [],
-            reminders: [] // NUEVO ARRAY PARA RECORDATORIOS
+            reminders: [] 
         };
 
         try {
             if (composeForm.id) {
-                // AL EDITAR: Eliminamos 'date' para NO sobrescribir la fecha original
                 delete msgData.date; 
-                // Mantenemos arrays existentes para no borrarlos al editar
                 delete msgData.readBy;
                 delete msgData.replies;
                 delete msgData.reactions;
@@ -387,11 +387,16 @@ window.Views.Messaging = ({ userProfile }) => {
             allowReplies: msg.allowReplies !== false,
             attachmentUrl: msg.attachmentUrl || '',
             attachmentType: msg.attachmentType || 'image',
+            
             linkUrl: msg.linkUrl || '',
             linkTitle: msg.linkTitle || '',
             pollOptions: msg.pollOptions ? msg.pollOptions.map(o => o.text) : ['', ''],
+            
             scheduledAt: msg.scheduledAt || '',
             eventDate: msg.eventDate || '',
+            location: msg.location || '',
+            
+            // Determinar estados de chips basados en datos
             hasEvent: !!msg.eventDate,
             hasLink: !!msg.linkUrl,
             hasPoll: !!msg.pollOptions && msg.pollOptions.length > 0
@@ -529,7 +534,7 @@ window.Views.Messaging = ({ userProfile }) => {
                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{formatDate(msg.date)}</span>
                              {/* CHIPS EN TARJETA */}
                              <div className="flex gap-1">
-                                {msg.type === 'poll' && <Badge type="brand">ENCUESTA</Badge>}
+                                {msg.pollOptions?.length > 0 && <Badge type="brand">ENCUESTA</Badge>}
                                 {msg.eventDate && <Badge type="brand" className="bg-purple-100 text-purple-700">EVENTO</Badge>}
                                 {msg.type === 'prayer' && <Badge type="warning">ORACIÓN</Badge>}
                              </div>
@@ -625,9 +630,10 @@ window.Views.Messaging = ({ userProfile }) => {
                                         {msg.from!==userProfile.id && <p className="text-[10px] font-bold text-orange-600 mb-1">{msg.fromName}</p>}
                                         {msg.attachmentUrl && <img src={msg.attachmentUrl} className="mb-2 rounded-lg max-h-60 object-cover cursor-pointer bg-black/10" onClick={()=>setImageModal(msg.attachmentUrl)}/>}
                                         <p className="whitespace-pre-wrap">{msg.content}</p>
-                                        {msg.type === 'link' && <a href={msg.linkUrl} target="_blank" className="block mt-2 text-xs underline truncate bg-black/10 p-2 rounded">{msg.linkUrl}</a>}
                                         
-                                        {msg.type === 'poll' && (
+                                        {msg.linkUrl && <a href={msg.linkUrl} target="_blank" className="block mt-2 text-xs underline truncate bg-black/10 p-2 rounded">{msg.linkTitle || msg.linkUrl}</a>}
+                                        
+                                        {msg.pollOptions?.length > 0 && (
                                             <div className="space-y-2 mt-2">
                                                 {msg.pollOptions.map((opt, i) => {
                                                     const votes = opt.votes?.length || 0;
@@ -701,6 +707,14 @@ window.Views.Messaging = ({ userProfile }) => {
                                     <div>
                                         <h4 className="font-bold text-sm uppercase opacity-70">Fecha del Evento</h4>
                                         <p className="font-extrabold text-lg">{formatDate(selectedBroadcast.eventDate, 'full')}</p>
+                                        
+                                        {/* NUEVO: MOSTRAR UBICACIÓN Y BOTÓN MAPA */}
+                                        {selectedBroadcast.location && (
+                                            <div className="flex items-center gap-1 mt-1 text-sm text-purple-700 font-medium">
+                                                <Icon name="MapPin" size={14}/> {selectedBroadcast.location}
+                                                <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedBroadcast.location)}`} target="_blank" className="ml-2 text-xs bg-white border border-purple-300 px-2 py-0.5 rounded-full hover:bg-purple-100 flex items-center gap-1 inline-flex">Ver Mapa <Icon name="ExternalLink" size={10}/></a>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="flex gap-2">
@@ -708,7 +722,7 @@ window.Views.Messaging = ({ userProfile }) => {
                                         <Icon name="Plus" size={14}/> Google Cal
                                     </a>
                                     <button onClick={()=>handleToggleReminder(selectedBroadcast.id)} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 ${selectedBroadcast.reminders?.includes(userProfile.id) ? 'bg-purple-600 text-white' : 'bg-white border border-purple-300 text-purple-700 hover:bg-purple-50'}`}>
-                                        <Icon name="Bell" size={14}/> {selectedBroadcast.reminders?.includes(userProfile.id) ? 'Recordatorio Activo' : 'Recordarme'}
+                                        <Icon name="Bell" size={14}/> {selectedBroadcast.reminders?.includes(userProfile.id) ? 'Activo' : 'Recordarme'}
                                     </button>
                                 </div>
                             </div>
@@ -742,8 +756,10 @@ window.Views.Messaging = ({ userProfile }) => {
                                     <h2 className="text-2xl font-extrabold text-slate-900 mb-2">{selectedBroadcast.content}</h2>
                                     <div className="prose prose-slate text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{selectedBroadcast.body}</div>
                                     
-                                    {selectedBroadcast.type === 'link' && <a href={selectedBroadcast.linkUrl} target="_blank" className="mt-4 block bg-blue-50 border border-blue-200 p-4 rounded-xl text-center text-blue-700 font-bold hover:bg-blue-100">{selectedBroadcast.linkTitle || 'Abrir Enlace'}</a>}
+                                    {/* CORRECCIÓN: MOSTRAR SIEMPRE SI EXISTE URL */}
+                                    {selectedBroadcast.linkUrl && <a href={selectedBroadcast.linkUrl} target="_blank" className="mt-4 block bg-blue-50 border border-blue-200 p-4 rounded-xl text-center text-blue-700 font-bold hover:bg-blue-100">{selectedBroadcast.linkTitle || 'Abrir Enlace'}</a>}
 
+                                    {/* CORRECCIÓN: MOSTRAR SIEMPRE SI HAY OPCIONES */}
                                     {selectedBroadcast.pollOptions?.length > 0 && (
                                         <div className="mt-4 space-y-2">
                                             {selectedBroadcast.pollOptions.map((opt, i) => {
@@ -830,7 +846,7 @@ window.Views.Messaging = ({ userProfile }) => {
                     <Input label="Título / Asunto" value={composeForm.content} onChange={e=>setComposeForm({...composeForm, content:e.target.value})}/>
                     <div><label className="label-modern mb-1">Cuerpo del mensaje</label><textarea className="input-modern h-32 text-sm resize-none" placeholder="Escribe aquí..." value={composeForm.body} onChange={e=>setComposeForm({...composeForm, body:e.target.value})}/></div>
                     
-                    {/* CHIPS DE FUNCIONALIDAD: ENCUESTA, ENLACE, EVENTO */}
+                    {/* CHIPS DE FUNCIONALIDAD */}
                     <div className="flex flex-wrap gap-2">
                         <button onClick={()=>setComposeForm(p=>({...p, hasPoll: !p.hasPoll}))} className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${composeForm.hasPoll?'bg-brand-600 text-white shadow-md':'bg-white text-slate-500'}`}>Encuesta</button>
                         <button onClick={()=>setComposeForm(p=>({...p, hasLink: !p.hasLink}))} className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${composeForm.hasLink?'bg-brand-600 text-white shadow-md':'bg-white text-slate-500'}`}>Enlace</button>
@@ -841,12 +857,15 @@ window.Views.Messaging = ({ userProfile }) => {
                     
                     {composeForm.hasLink && <div className="space-y-2"><Input label="Título del Botón" value={composeForm.linkTitle} onChange={e=>setComposeForm({...composeForm, linkTitle:e.target.value})} placeholder="Ej: Unirme al Meet"/><Input label="URL (https://...)" value={composeForm.linkUrl} onChange={e=>setComposeForm({...composeForm, linkUrl:e.target.value})}/></div>}
 
-                    {/* INPUT DE EVENTO (NUEVO) */}
                     {composeForm.hasEvent && (
-                        <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 animate-enter">
+                        <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 animate-enter space-y-2">
                             <label className="label-modern text-purple-800">Fecha del Evento</label>
                             <Input type="datetime-local" value={composeForm.eventDate} onChange={e=>setComposeForm({...composeForm, eventDate:e.target.value})}/>
-                            <p className="text-[10px] text-purple-600 mt-1">* Los usuarios verán opciones para agendar y recordatorios.</p>
+                            
+                            {/* NUEVO CAMPO LUGAR */}
+                            <Input label="Lugar / Dirección" placeholder="Ej: Av. San Martín 1234" value={composeForm.location} onChange={e=>setComposeForm({...composeForm, location:e.target.value})}/>
+                            
+                            <p className="text-[10px] text-purple-600 mt-1">* Se generará un enlace a Google Maps y Calendar.</p>
                         </div>
                     )}
 
