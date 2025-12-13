@@ -73,8 +73,18 @@
         window.googleProvider = new firebase.auth.GoogleAuthProvider();
         
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js').catch(() => {}));
-        }
+        navigator.serviceWorker.register('./service-worker.js')
+        .then((registration) => {
+            console.log('Service Worker registrado con éxito:', registration);
+            
+            // --- AQUÍ CONECTAMOS FIREBASE CON TU SERVICE WORKER ---
+            const messaging = firebase.messaging();
+            messaging.useServiceWorker(registration);
+            
+            // Luego aquí puedes llamar a la función de pedir permisos (DataLogic.initializeNotifications)
+        })
+        .catch((err) => console.log('Error registro SW:', err));
+    }
     </script>
 
     <!-- Carga de Módulos -->
