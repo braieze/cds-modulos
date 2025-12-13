@@ -4,7 +4,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
     // 1. HOOKS
     const { useState, useMemo, useRef, useEffect } = React;
     const Utils = window.Utils || {};
-    const { Icon, Button, Input, Modal, Select } = Utils;
+    const { Icon, Button, Input, Modal, Select, SmartSelect } = Utils;
 
     // 2. ESTADOS
     const [searchTerm, setSearchTerm] = useState('');
@@ -46,16 +46,14 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
         return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=0f172a&color=cbd5e1&size=512&font-size=0.33`;
     };
 
-    // ID ESTABLE: Generado determinísticamente basado en el ID de Firebase o el nombre
+    // ID ESTABLE
     const getStableID = (m) => {
         if (m.credentialId) return m.credentialId;
-        // Fallback estable si no tiene credentialId guardado
         const suffix = m.id ? m.id.substring(0, 4).toUpperCase() : 'TEMP';
         const initials = m.name ? m.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase() : 'XX';
         return `CDS-${initials}-${suffix}`;
     };
 
-    // Generar ID aleatorio solo al CREAR nuevo usuario
     const generateNewID = (name) => {
         const initials = name.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase();
         const randomNum = Math.floor(1000 + Math.random() * 9000);
@@ -137,7 +135,6 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
             emergencyPhone: form.emergencyPhone,
             photo: form.photo,
             joinedDate: form.joinedDate,
-            // Si ya existe ID lo mantenemos, si es nuevo generamos uno fijo
             credentialId: form.credentialId || generateNewID(form.name)
         };
 
@@ -224,11 +221,11 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
         const year = new Date().getFullYear();
         const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${m.id}`;
         
-        const DARK_BG = "bg-[#0f172a]"; // Azul oscuro sólido
+        const DARK_BG = "bg-[#0f172a]";
 
         if (isFront) {
             return (
-                <div className="w-full h-full bg-white relative overflow-hidden flex flex-col items-center select-none font-sans">
+                <div className="w-full h-full bg-white relative overflow-hidden flex flex-col items-center select-none font-sans" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
                     {/* PARTE SUPERIOR (BLANCA) */}
                     <div className="w-full h-[45%] bg-white relative pt-8 text-center z-10 flex flex-col items-center">
                         <div className="w-8 h-1.5 bg-slate-200 rounded-full mb-2"></div>
@@ -271,10 +268,11 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
             );
         }
 
-        // DORSO
+        // DORSO (AZUL OSCURO SÓLIDO + SOLUCIÓN TRANSPARENCIA)
         return (
-            <div className={`w-full h-full ${DARK_BG} relative overflow-hidden flex flex-col p-6 font-sans text-white`}>
-                <div className={`absolute inset-0 ${DARK_BG} z-0`}></div>
+            <div className={`w-full h-full ${DARK_BG} relative overflow-hidden flex flex-col p-6 font-sans text-white`} style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)', WebkitTransform: 'rotateY(180deg)' }}>
+                {/* Capa de Bloqueo Visual (Extra) */}
+                <div className="absolute inset-0 bg-[#0f172a] z-[-1]" style={{ pointerEvents: 'none' }}></div>
                 
                 <div className="relative z-10 text-center mb-6 mt-4 flex flex-col items-center">
                     <div className="w-10 h-10 rounded-full border-2 border-slate-700 flex items-center justify-center mb-2">
@@ -284,7 +282,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                 </div>
 
                 <div className="relative z-10 flex-1 space-y-4">
-                    <div className="bg-[#1e293b] p-5 rounded-2xl border border-slate-700 space-y-4">
+                    <div className="bg-[#1e293b] p-5 rounded-2xl border border-slate-700 space-y-4 shadow-sm">
                         <div>
                             <div className="flex items-center gap-2 mb-1">
                                 <div className="w-2 h-2 rounded-full border border-blue-500"></div>
@@ -306,7 +304,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                             </div>
                             <p className="text-xs font-medium text-white pl-4 leading-tight group-hover:text-blue-400 transition-colors">{m.address || 'No registrada'}</p>
                         </div>
-                        {(m.emergencyContact || m.emergencyPhone) && (
+                        {(m.emergencyContact) && (
                             <div className="pt-3 border-t border-slate-700 mt-2">
                                 <div className="flex items-center gap-2 mb-2">
                                     <div className="w-2 h-2 rounded-full border border-red-500"></div>
@@ -317,10 +315,10 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                                         <span className="text-xs font-bold text-white block">{m.emergencyContact}</span>
                                         <span className="text-[10px] text-slate-400">{m.emergencyPhone}</span>
                                     </div>
-                                    {/* BOTÓN WHATSAPP EMERGENCIA */}
+                                    {/* BOTÓN WHATSAPP EMERGENCIA (FIXED) */}
                                     {m.emergencyPhone && (
-                                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(m.emergencyPhone)}} className="p-2 bg-emerald-900/50 text-emerald-400 rounded-full hover:bg-emerald-800 transition-colors">
-                                            <Icon name="MessageCircle" size={14}/>
+                                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(m.emergencyPhone)}} className="p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors shadow-md z-20">
+                                            <Icon name="MessageCircle" size={16}/>
                                         </button>
                                     )}
                                 </div>
@@ -337,7 +335,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                             <Icon name="Phone" size={14} /> Llamar
                         </button>
                         
-                        {/* BOTÓN VISITA PASTORAL CONECTADO */}
+                        {/* BOTÓN VISITA PASTORAL */}
                         {['Pastor', 'Líder', 'Servidor'].includes(userProfile?.role) && (
                             <button onClick={(e)=>{e.stopPropagation(); handleScheduleVisit(m)}} className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 py-2.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all">
                                 <Icon name="Calendar" size={14} /> Visita Pastoral
@@ -383,12 +381,10 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                                 <p className="text-[10px] text-slate-500 font-bold uppercase truncate">{member.role}</p>
                             </div>
                         </div>
-                        {userProfile?.role === 'Pastor' && (
-                            <div className="flex flex-col gap-1 border-l border-slate-100 pl-2">
-                                <button onClick={()=>handleEdit(member)} className="text-slate-400 hover:text-brand-600 p-1"><Icon name="Edit" size={14}/></button>
-                                <button onClick={()=>handleDelete(member.id)} className="text-slate-400 hover:text-red-600 p-1"><Icon name="Trash" size={14}/></button>
-                            </div>
-                        )}
+                        <div className="flex flex-col gap-1 border-l border-slate-100 pl-2">
+                            <button onClick={()=>handleEdit(member)} className="text-slate-400 hover:text-brand-600 p-1"><Icon name="Edit" size={14}/></button>
+                            <button onClick={()=>handleDelete(member.id)} className="text-slate-400 hover:text-red-600 p-1"><Icon name="Trash" size={14}/></button>
+                        </div>
                     </div>
                 ))}
             </div>
@@ -472,13 +468,13 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                     <div className="relative z-10 animate-enter flex flex-col items-center gap-6">
                         <div className="perspective-1000 w-[320px] h-[520px] cursor-pointer group select-none relative" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
                             <div className={`relative w-full h-full duration-700 transform-style-3d transition-all ${isFlipped ? 'rotate-y-180' : ''}`}>
-                                {/* Frente - Fondo Sólido Blanco */}
-                                <div className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden bg-white border border-slate-200">
+                                {/* Frente */}
+                                <div className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden bg-white border border-slate-200" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
                                     <CardContent m={selectedMember} isFront={true} />
                                     <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-slate-400 flex items-center gap-1 z-50 bg-white/20 px-2 py-0.5 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
                                 </div>
-                                {/* Dorso - Fondo Sólido Oscuro */}
-                                <div className="absolute w-full h-full backface-hidden rotate-y-180 rounded-[24px] shadow-2xl overflow-hidden bg-[#0f172a] border border-slate-800">
+                                {/* Dorso */}
+                                <div className="absolute w-full h-full backface-hidden rotate-y-180 rounded-[24px] shadow-2xl overflow-hidden bg-[#0f172a] border border-slate-800" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)', WebkitTransform: 'rotateY(180deg)' }}>
                                     <CardContent m={selectedMember} isFront={false} />
                                 </div>
                             </div>
@@ -498,9 +494,9 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
 
             <style>{`
                 .perspective-1000 { perspective: 1000px; }
-                .transform-style-3d { transform-style: preserve-3d; }
-                .backface-hidden { backface-visibility: hidden; }
-                .rotate-y-180 { transform: rotateY(180deg); }
+                .transform-style-3d { transform-style: preserve-3d; -webkit-transform-style: preserve-3d; }
+                .backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+                .rotate-y-180 { transform: rotateY(180deg); -webkit-transform: rotateY(180deg); }
                 .custom-scrollbar::-webkit-scrollbar { width: 3px; }
                 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
             `}</style>
