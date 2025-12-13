@@ -1,11 +1,12 @@
 window.Views = window.Views || {};
 
 window.Views.Directory = ({ members, addData, updateData, deleteData, userProfile, setActiveTab }) => {
-    const { useState, useMemo, useRef } = React;
+    // 1. HOOKS
+    const { useState, useMemo, useRef, useEffect } = React;
     const Utils = window.Utils || {};
     const { Icon, Button, Input, Modal, Select } = Utils;
 
-    // --- ESTADOS ---
+    // 2. ESTADOS
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedMember, setSelectedMember] = useState(null); 
     const [isEditing, setIsEditing] = useState(false); 
@@ -27,7 +28,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
     const [form, setForm] = useState(initialForm);
     const printRef = useRef(null); 
 
-    // --- HELPERS ---
+    // 3. HELPERS
     const getField = (item, ...keys) => {
         if(!item) return null;
         for (let key of keys) if (item[key] !== undefined) return item[key];
@@ -45,12 +46,20 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
         return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=0f172a&color=cbd5e1&size=512&font-size=0.33`;
     };
 
-    // ID ESTABLE
+    // ID ESTABLE: Generado determinísticamente basado en el ID de Firebase o el nombre
     const getStableID = (m) => {
         if (m.credentialId) return m.credentialId;
-        const suffix = m.id ? m.id.slice(0, 4).toUpperCase() : 'TEMP';
+        // Fallback estable si no tiene credentialId guardado
+        const suffix = m.id ? m.id.substring(0, 4).toUpperCase() : 'TEMP';
         const initials = m.name ? m.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase() : 'XX';
         return `CDS-${initials}-${suffix}`;
+    };
+
+    // Generar ID aleatorio solo al CREAR nuevo usuario
+    const generateNewID = (name) => {
+        const initials = name.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase();
+        const randomNum = Math.floor(1000 + Math.random() * 9000);
+        return `CDS-${initials}-${randomNum}`;
     };
 
     const openWhatsApp = (phone, message = '') => {
@@ -79,7 +88,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
         }
     };
 
-    // --- CRUD ---
+    // 4. CRUD
     const handleEdit = (member) => {
         setForm({
             id: member.id,
@@ -128,7 +137,8 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
             emergencyPhone: form.emergencyPhone,
             photo: form.photo,
             joinedDate: form.joinedDate,
-            credentialId: form.credentialId || getStableID({ ...form, id: form.id || Date.now().toString() })
+            // Si ya existe ID lo mantenemos, si es nuevo generamos uno fijo
+            credentialId: form.credentialId || generateNewID(form.name)
         };
 
         if (form.id) {
@@ -159,7 +169,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
         return (m.name||'').toLowerCase().includes(term) || (m.role||'').toLowerCase().includes(term);
     });
 
-    // --- PDF ---
+    // 5. PDF
     const downloadPDF = async () => {
         if (!selectedMember || !printRef.current) return;
         setIsDownloading(true);
@@ -170,7 +180,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                 if (!worker || typeof worker !== 'function') {
                     await new Promise((resolve, reject) => {
                         const script = document.createElement('script');
-                        script.src = '[https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js](https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js)';
+                        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
                         script.onload = resolve;
                         script.onerror = () => reject("Error al cargar script PDF");
                         document.head.appendChild(script);
@@ -201,7 +211,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
         }, 500);
     };
 
-    // --- DISEÑO DE TARJETA ---
+    // --- DISEÑO DE TARJETA (SPLIT CON CORTE CIRCULAR) ---
     const CardContent = ({ m, isFront }) => {
         if (!m) return null;
         
@@ -214,7 +224,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
         const year = new Date().getFullYear();
         const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${m.id}`;
         
-        const DARK_BG = "bg-[#0f172a]"; 
+        const DARK_BG = "bg-[#0f172a]"; // Azul oscuro sólido
 
         if (isFront) {
             return (
@@ -227,7 +237,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                         <p className="text-[9px] font-bold text-slate-800 mt-0.5">{year}</p>
                     </div>
 
-                    {/* FOTO CENTRAL CON EFECTO DE CORTE */}
+                    {/* FOTO CENTRAL CON EFECTO DE CORTE (BORDE BLANCO GRUESO) */}
                     <div className="absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-30">
                         <div className="w-[140px] h-[140px] rounded-full border-[8px] border-white bg-white shadow-xl overflow-hidden">
                             <img src={photo} className="w-full h-full object-cover rounded-full bg-slate-200" alt={m.name} crossOrigin="anonymous"/>
@@ -296,15 +306,23 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                             </div>
                             <p className="text-xs font-medium text-white pl-4 leading-tight group-hover:text-blue-400 transition-colors">{m.address || 'No registrada'}</p>
                         </div>
-                        {(m.emergencyContact) && (
-                            <div className="pt-3 border-t border-slate-700">
-                                <div className="flex items-center gap-2 mb-1">
+                        {(m.emergencyContact || m.emergencyPhone) && (
+                            <div className="pt-3 border-t border-slate-700 mt-2">
+                                <div className="flex items-center gap-2 mb-2">
                                     <div className="w-2 h-2 rounded-full border border-red-500"></div>
                                     <p className="text-[8px] text-red-400 uppercase font-bold tracking-wider">Emergencia</p>
                                 </div>
-                                <div className="pl-4 flex justify-between items-end">
-                                    <span className="text-xs font-bold text-white">{m.emergencyContact}</span>
-                                    <span className="text-[10px] text-slate-400">{m.emergencyPhone}</span>
+                                <div className="pl-4 flex justify-between items-center">
+                                    <div>
+                                        <span className="text-xs font-bold text-white block">{m.emergencyContact}</span>
+                                        <span className="text-[10px] text-slate-400">{m.emergencyPhone}</span>
+                                    </div>
+                                    {/* BOTÓN WHATSAPP EMERGENCIA */}
+                                    {m.emergencyPhone && (
+                                        <button onClick={(e)=>{e.stopPropagation(); openWhatsApp(m.emergencyPhone)}} className="p-2 bg-emerald-900/50 text-emerald-400 rounded-full hover:bg-emerald-800 transition-colors">
+                                            <Icon name="MessageCircle" size={14}/>
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -337,6 +355,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
 
     return (
         <div className="space-y-6 fade-in pb-24 font-sans text-slate-800">
+            {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="flex items-center gap-3">
                     <h2 className="text-2xl font-extrabold text-slate-800">Directorio</h2>
@@ -353,6 +372,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                 </div>
             </div>
 
+            {/* Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {filteredMembers.map(member => (
                     <div key={member.id} className="group bg-white p-3 rounded-2xl shadow-sm border border-slate-100 hover:shadow-lg transition-all flex items-center gap-3 relative">
@@ -373,6 +393,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                 ))}
             </div>
 
+            {/* Modal CRUD */}
             <Modal isOpen={isEditing} onClose={()=>setIsEditing(false)} title={form.id ? "Editar Miembro" : "Nuevo Miembro"}>
                 <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
                     <Input label="Link Foto (Drive o URL)" value={form.photo} onChange={e=>setForm({...form, photo:e.target.value})} placeholder="https://..." />
@@ -437,22 +458,26 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                 </div>
             </Modal>
 
+            {/* PDF OCULTO (PLANO) */}
             {selectedMember && (
                 <div ref={printRef} style={{ display: 'none', width: '340px', height: '540px' }}>
                     <CardContent m={selectedMember} isFront={true} />
                 </div>
             )}
 
+            {/* Modal CREDENCIAL (3D) */}
             {selectedMember && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-md transition-opacity" onClick={() => setSelectedMember(null)}></div>
                     <div className="relative z-10 animate-enter flex flex-col items-center gap-6">
                         <div className="perspective-1000 w-[320px] h-[520px] cursor-pointer group select-none relative" onClick={() => !isDownloading && setIsFlipped(!isFlipped)}>
                             <div className={`relative w-full h-full duration-700 transform-style-3d transition-all ${isFlipped ? 'rotate-y-180' : ''}`}>
+                                {/* Frente - Fondo Sólido Blanco */}
                                 <div className="absolute w-full h-full backface-hidden rounded-[24px] shadow-2xl overflow-hidden bg-white border border-slate-200">
                                     <CardContent m={selectedMember} isFront={true} />
                                     <div className="absolute bottom-2 right-1/2 translate-x-1/2 text-[9px] text-slate-400 flex items-center gap-1 z-50 bg-white/20 px-2 py-0.5 rounded-full"><Icon name="RotateCw" size={10} /> Girar</div>
                                 </div>
+                                {/* Dorso - Fondo Sólido Oscuro */}
                                 <div className="absolute w-full h-full backface-hidden rotate-y-180 rounded-[24px] shadow-2xl overflow-hidden bg-[#0f172a] border border-slate-800">
                                     <CardContent m={selectedMember} isFront={false} />
                                 </div>
