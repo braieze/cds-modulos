@@ -7,7 +7,7 @@ window.Views.Messaging = ({ userProfile }) => {
     const { Button, Input, Select, Icon, formatDate, compressImage, Modal, Badge } = Utils;
 
     // 2. ESTADOS
-    const [activeTab, setActiveTab] = useState('broadcast'); // 'broadcast' | 'ministries' | 'groups' | 'direct'
+    const [activeTab, setActiveTab] = useState('broadcast');
     const [messages, setMessages] = useState([]);
     const [members, setMembers] = useState([]);
     const [groups, setGroups] = useState([]);
@@ -17,10 +17,10 @@ window.Views.Messaging = ({ userProfile }) => {
     const [selectedBroadcastId, setSelectedBroadcastId] = useState(null);
     
     const [isComposeOpen, setIsComposeOpen] = useState(false);
-    const [imageModal, setImageModal] = useState(null); // Para ver fotos en grande
-    const [viewersModal, setViewersModal] = useState(null); // Para ver vistos
+    const [imageModal, setImageModal] = useState(null);
+    const [viewersModal, setViewersModal] = useState(null); // Lista de vistos
     const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
-    const [chatInfoModal, setChatInfoModal] = useState(null); // Info del grupo
+    const [chatInfoModal, setChatInfoModal] = useState(null);
     const [searchTerm, setSearchTerm] = useState("");
     
     // PAGINACIÓN
@@ -31,11 +31,21 @@ window.Views.Messaging = ({ userProfile }) => {
 
     // Formularios
     const initialCompose = { 
-        id: null, to: '', context: 'individual', type: 'text', category: 'General',
-        content: '', body: '', 
-        isPinned: false, allowReplies: true, 
-        attachmentUrl: '', attachmentType: 'image', 
-        pollOptions: ['', ''], linkUrl: '', scheduledAt: ''
+        id: null, 
+        to: '', 
+        context: 'individual', // 'broadcast' | 'individual'
+        recipientType: 'member', // 'member' | 'ministry' | 'group' (NUEVO PARA CORREGIR ERROR 1)
+        type: 'text', 
+        category: 'General',
+        content: '', 
+        body: '', 
+        isPinned: false, 
+        allowReplies: true, 
+        attachmentUrl: '', 
+        attachmentType: 'image', 
+        pollOptions: ['', ''], 
+        linkUrl: '', 
+        scheduledAt: '' // (NUEVO PARA CORREGIR ERROR 3)
     };
     const [composeForm, setComposeForm] = useState(initialCompose);
     const [newGroupForm, setNewGroupForm] = useState({ name: '', members: [] });
@@ -53,15 +63,12 @@ window.Views.Messaging = ({ userProfile }) => {
     useEffect(() => {
         if (!window.db) return;
         
-        // Listener Mensajes
         const unsubMsg = window.db.collection('messages').orderBy('date', 'desc').limit(500).onSnapshot(snap => {
             setMessages(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
-        // Listener Miembros
         const unsubMem = window.db.collection('members').onSnapshot(snap => {
             setMembers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
-        // Listener Grupos
         const unsubGroups = window.db.collection('groups').onSnapshot(snap => {
             setGroups(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
@@ -69,14 +76,13 @@ window.Views.Messaging = ({ userProfile }) => {
         return () => { unsubMsg(); unsubMem(); unsubGroups(); };
     }, []);
 
-    // Scroll al fondo al abrir chat
+    // Scroll
     useEffect(() => {
         if (scrollRef.current && !highlightId) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [selectedChatId]);
 
-    // Scroll a mensaje resaltado
     useEffect(() => {
         if (highlightId && messageRefs.current[highlightId]) {
             messageRefs.current[highlightId].scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -87,22 +93,25 @@ window.Views.Messaging = ({ userProfile }) => {
     // --- 4. HELPERS ---
     const getGroupMembers = (chat) => {
         if (!chat) return [];
-        // Si es Ministerio (group:Alabanza)
         if (chat.chatId && chat.chatId.startsWith('group:')) {
              const gName = chat.chatId.split(':')[1];
              return members.filter(m => m.ministry === gName || m.role === 'Pastor');
         }
-        // Si es Grupo Custom (custom:ID)
         if (chat.chatId && chat.chatId.startsWith('custom:')) {
             const gId = chat.chatId.split(':')[1];
-            // Buscar en el objeto de grupo original si está disponible, o buscar en el estado groups
             const grp = chat.groupData || groups.find(g => g.id === gId);
             if (grp) return members.filter(m => grp.members.includes(m.id));
         }
         return [];
     };
 
-    // --- 5. FILTRADO Y AGRUPACIÓN DE MENSAJES ---
+    // Obtener lista única de ministerios para el select
+    const uniqueMinistries = useMemo(() => {
+        const mins = members.map(m => m.ministry).filter(Boolean);
+        return [...new Set(mins)];
+    }, [members]);
+
+    // --- 5. FILTRADO Y AGRUPACIÓN ---
     const categorizedMessages = useMemo(() => {
         const matchesSearch = (msg) => {
             if (!searchTerm) return true;
@@ -132,11 +141,10 @@ window.Views.Messaging = ({ userProfile }) => {
                 }
                 return;
             }
-            // Grupos Personalizados
+            // Grupos Custom
             if (msg.to.startsWith('custom:')) {
                 const gId = msg.to.split(':')[1];
                 const grp = groups.find(g => g.id === gId);
-                // Mostrar si soy miembro o creador
                 if ((grp && grp.members.includes(userProfile.id)) || msg.from === userProfile.id) {
                     const title = grp ? grp.name : 'Grupo';
                     if (!customGroups[msg.to]) customGroups[msg.to] = { id: msg.to, chatId: msg.to, title: title, msgs: [], groupData: grp, color: 'bg-purple-100 text-purple-600', icon: 'Users' }; 
@@ -151,8 +159,8 @@ window.Views.Messaging = ({ userProfile }) => {
                 if (!directs[chatId]) {
                     const otherUser = members.find(m => m.id === otherId);
                     directs[chatId] = { 
-                        id: otherId, // ID del usuario destino
-                        chatId, // ID del chat
+                        id: otherId, 
+                        chatId, 
                         title: otherUser ? otherUser.name : 'Usuario', 
                         photo: otherUser?.photo, 
                         msgs: [], 
@@ -165,7 +173,7 @@ window.Views.Messaging = ({ userProfile }) => {
             }
         });
         
-        // Agregar grupos vacíos (para que aparezcan aunque no tengan mensajes)
+        // Agregar grupos vacíos
         groups.forEach(g => {
             if (g.members.includes(userProfile.id)) {
                 const key = `custom:${g.id}`;
@@ -184,7 +192,6 @@ window.Views.Messaging = ({ userProfile }) => {
         return { broadcasts, ministries: sortChats(ministries), groups: sortChats(customGroups), directs: sortChats(directs) };
     }, [messages, userProfile, members, groups, searchTerm]);
 
-    // Objetos seleccionados (Derivados de IDs para reactividad)
     const selectedChat = useMemo(() => {
         if (!selectedChatId) return null;
         const allChats = [...categorizedMessages.ministries, ...categorizedMessages.groups, ...categorizedMessages.directs];
@@ -197,7 +204,7 @@ window.Views.Messaging = ({ userProfile }) => {
     }, [selectedBroadcastId, categorizedMessages]);
 
 
-    // --- 6. ACCIONES (TODAS) ---
+    // --- 6. ACCIONES ---
 
     const handleImage = async (e) => {
         const file = e.target.files[0];
@@ -220,22 +227,31 @@ window.Views.Messaging = ({ userProfile }) => {
         finally { setIsUploading(false); }
     };
 
+    const handleRemoveAttachment = () => {
+        setComposeForm(p => ({ ...p, attachmentUrl: '', attachmentType: 'image' }));
+    };
+
     const handleSend = async () => {
         if (!composeForm.content) return Utils.notify("Falta el Título", "error");
         
         let recipient = composeForm.to;
-        if (composeForm.context === 'group') recipient = `group:${composeForm.to}`;
-        if (composeForm.context === 'custom_group') recipient = `custom:${composeForm.to}`;
-        if (composeForm.context === 'broadcast') recipient = 'all';
+        // Lógica corregida de destinatarios (Error 1)
+        if (composeForm.context === 'broadcast') {
+            recipient = 'all';
+        } else {
+            // Contexto individual/grupal
+            if (composeForm.recipientType === 'group') recipient = `custom:${composeForm.to}`;
+            else if (composeForm.recipientType === 'ministry') recipient = `group:${composeForm.to}`;
+            // Si es 'member', recipient ya es el ID
+        }
 
-        // Forzar categoría Oración si es el tipo prayer
         const finalCategory = composeForm.type === 'prayer' ? 'Oración' : composeForm.category;
 
         const msgData = {
             from: userProfile.id,
             fromName: userProfile.name,
             to: recipient,
-            type: composeForm.type, // text, poll, link, prayer
+            type: composeForm.type,
             category: finalCategory, 
             content: composeForm.content,
             body: composeForm.body,
@@ -246,6 +262,7 @@ window.Views.Messaging = ({ userProfile }) => {
             linkUrl: composeForm.linkUrl,
             pollOptions: composeForm.type === 'poll' ? composeForm.pollOptions.map(o => ({ text: o, votes: [] })) : [],
             date: new Date().toISOString(),
+            scheduledAt: composeForm.scheduledAt || null, // Guardar fecha programada (Error 3)
             readBy: [userProfile.id],
             replies: [],
             reactions: {},
@@ -277,7 +294,6 @@ window.Views.Messaging = ({ userProfile }) => {
                 createdAt: new Date().toISOString()
             });
 
-            // Mensaje inicial para activar chat
             await window.db.collection('messages').add({
                 from: userProfile.id,
                 fromName: 'Sistema',
@@ -310,12 +326,47 @@ window.Views.Messaging = ({ userProfile }) => {
         }
     };
 
+    const handleEditMessage = (msg) => {
+        // Lógica de recuperación para edición
+        let ctx = 'individual';
+        let recType = 'member';
+        let toVal = msg.to;
+
+        if (msg.to === 'all') { 
+            ctx = 'broadcast'; 
+        } else if (msg.to.startsWith('group:')) { 
+            ctx = 'individual'; recType = 'ministry'; toVal = msg.to.split(':')[1]; 
+        } else if (msg.to.startsWith('custom:')) { 
+            ctx = 'individual'; recType = 'group'; toVal = msg.to.split(':')[1]; 
+        } else {
+            ctx = 'individual'; recType = 'member';
+        }
+
+        setComposeForm({
+            id: msg.id,
+            to: toVal,
+            context: ctx,
+            recipientType: recType,
+            type: msg.type || 'text',
+            category: msg.category || 'General',
+            content: msg.content,
+            body: msg.body || '',
+            isPinned: msg.isPinned || false,
+            allowReplies: msg.allowReplies !== false,
+            attachmentUrl: msg.attachmentUrl || '',
+            attachmentType: msg.attachmentType || 'image',
+            linkUrl: msg.linkUrl || '',
+            pollOptions: msg.pollOptions ? msg.pollOptions.map(o => o.text) : ['', ''],
+            scheduledAt: msg.scheduledAt || ''
+        });
+        setIsComposeOpen(true);
+    };
+
     const handleDeleteChat = async (chat) => {
         if(!chat) return;
         if(confirm("¿Eliminar este chat y todos sus mensajes?")) {
             const batch = window.db.batch();
             chat.msgs.forEach(m => batch.delete(window.db.collection('messages').doc(m.id)));
-            // Si es grupo custom borrar el grupo
             if(chat.chatId.startsWith('custom:')) {
                 batch.delete(window.db.collection('groups').doc(chat.chatId.split(':')[1]));
             }
@@ -329,7 +380,6 @@ window.Views.Messaging = ({ userProfile }) => {
         const msg = messages.find(m => m.id === msgId);
         if (!msg) return;
         const current = msg.reactions || {};
-        // Toggle
         if (current[userProfile.id] === emoji) delete current[userProfile.id];
         else current[userProfile.id] = emoji;
         await window.db.collection('messages').doc(msgId).update({ reactions: current });
@@ -339,7 +389,6 @@ window.Views.Messaging = ({ userProfile }) => {
         const msg = messages.find(m => m.id === msgId);
         if (!msg) return;
         const opts = [...msg.pollOptions];
-        // Voto único
         opts.forEach(op => { if (op.votes?.includes(userProfile.id)) op.votes = op.votes.filter(id => id !== userProfile.id); });
         opts[idx].votes = [...(opts[idx].votes || []), userProfile.id];
         await window.db.collection('messages').doc(msgId).update({ pollOptions: opts });
@@ -349,7 +398,6 @@ window.Views.Messaging = ({ userProfile }) => {
         const msg = messages.find(m => m.id === msgId);
         if (!msg) return;
         const prayed = msg.prayedBy || [];
-        // Toggle oración
         const newPrayed = prayed.includes(userProfile.id) ? prayed.filter(id => id !== userProfile.id) : [...prayed, userProfile.id];
         await window.db.collection('messages').doc(msgId).update({ prayedBy: newPrayed });
         Utils.notify(prayed.includes(userProfile.id) ? "Quitaste tu oración" : "Oraste por esto 🙏");
@@ -372,37 +420,11 @@ window.Views.Messaging = ({ userProfile }) => {
             content: replyText, type: 'text', date: new Date().toISOString(),
             readBy: [userProfile.id], replies: [], reactions: {}
         };
-        // Si es directo, aseguramos que vaya al ID del otro usuario (para mantener estructura)
         if (activeTab === 'direct') newMessage.to = selectedChat.otherId || selectedChat.id;
         try {
             await window.db.collection('messages').add(newMessage);
             setReplyText("");
         } catch(e) { console.error(e); }
-    };
-
-    const handleEditMessage = (msg) => {
-        let ctx = 'individual';
-        let toVal = msg.to;
-        if (msg.to === 'all') { ctx = 'broadcast'; }
-        else if (msg.to.startsWith('group:')) { ctx = 'group'; toVal = msg.to.split(':')[1]; }
-        else if (msg.to.startsWith('custom:')) { ctx = 'custom_group'; toVal = msg.to.split(':')[1]; }
-
-        setComposeForm({
-            id: msg.id,
-            to: toVal,
-            context: ctx,
-            type: msg.type || 'text',
-            category: msg.category || 'General',
-            content: msg.content,
-            body: msg.body || '',
-            isPinned: msg.isPinned || false,
-            allowReplies: msg.allowReplies !== false,
-            attachmentUrl: msg.attachmentUrl || '',
-            attachmentType: msg.attachmentType || 'image',
-            linkUrl: msg.linkUrl || '',
-            pollOptions: msg.pollOptions ? msg.pollOptions.map(o => o.text) : ['', '']
-        });
-        setIsComposeOpen(true);
     };
 
     // --- ESTILOS VISUALES ---
@@ -436,16 +458,25 @@ window.Views.Messaging = ({ userProfile }) => {
                          ) : (
                              msg.attachmentUrl && msg.attachmentType === 'image' ? (
                                 <img src={msg.attachmentUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
-                            ) : (
+                             ) : (
                                 <div className={`w-full h-full bg-gradient-to-br ${getCoverStyle(msg.category || 'General')} flex flex-col items-center justify-center text-white p-4 text-center relative`}>
                                     <div className="bg-white/20 p-2 rounded-full backdrop-blur-md mb-1 shadow-lg relative z-10">
                                         <Icon name={getCoverIcon(msg.category)} size={24} />
                                     </div>
                                     <span className="text-[10px] font-black uppercase tracking-[0.2em] bg-black/20 px-2 py-0.5 rounded border border-white/10 relative z-10">{msg.category || 'GENERAL'}</span>
                                 </div>
-                            )
+                             )
                          )}
                         {msg.isPinned && <div className="absolute top-2 right-2 bg-yellow-400 text-yellow-900 p-1 rounded-full shadow-sm z-10"><Icon name="Bell" size={12} className="fill-current"/></div>}
+                        
+                        {/* BOTÓN EDITAR (Error 2) */}
+                        {(isAdmin || msg.from === userProfile.id) && (
+                            <div className="absolute top-2 left-2 flex gap-1 z-20">
+                                <button onClick={(e) => { e.stopPropagation(); handleEditMessage(msg); }} className="bg-white/90 p-1.5 rounded-full shadow hover:bg-white text-slate-700">
+                                    <Icon name="Edit" size={14}/>
+                                </button>
+                            </div>
+                        )}
                     </div>
                     
                     <div className="p-4 flex-1 flex flex-col gap-1">
@@ -457,19 +488,22 @@ window.Views.Messaging = ({ userProfile }) => {
                         <h3 className="font-extrabold text-lg text-slate-900 leading-tight mb-1 line-clamp-2">{msg.content}</h3>
                         <p className="text-sm text-slate-500 line-clamp-2 mb-2">{msg.body || 'Ver detalles...'}</p>
                         
-                        {/* BARRA REACCIONES */}
+                        {/* BARRA REACCIONES (Error 4: ocultar si es 0) */}
                         <div className="flex items-center justify-between border-t border-slate-50 pt-2 mt-auto">
                             <div className="flex gap-2">
                                 {['❤️','🙏','🔥'].map(em => {
                                     const count = Object.values(msg.reactions||{}).filter(v=>v===em).length;
-                                    if(count === 0 && !msg.reactions?.[userProfile.id]===em) return null;
+                                    if(count === 0) return null; // CORRECCIÓN: Si es 0 no mostrar
                                     return (
                                         <span key={em} className="text-xs bg-slate-100 px-1.5 py-0.5 rounded-full flex items-center gap-1 border border-slate-200">
                                             {em} <span className="font-bold text-slate-600">{count}</span>
                                         </span>
                                     );
                                 })}
-                                <span className="text-[10px] text-slate-400 flex items-center gap-1 ml-1"><Icon name="Eye" size={10}/> {msg.readBy?.length || 0}</span>
+                                {/* ERROR 4: Contador de vistos clicable */}
+                                <span className="text-[10px] text-slate-400 flex items-center gap-1 ml-1 cursor-pointer hover:text-brand-600" onClick={(e)=>{e.stopPropagation(); setViewersModal(msg);}}>
+                                    <Icon name="Eye" size={10}/> {msg.readBy?.length || 0}
+                                </span>
                             </div>
                             <span className="text-xs font-bold text-brand-600 flex items-center gap-1 group-hover:translate-x-1 transition-transform">Abrir <Icon name="ArrowRight" size={12}/></span>
                         </div>
@@ -484,7 +518,7 @@ window.Views.Messaging = ({ userProfile }) => {
         </div>
     );
 
-    // VISTA CHAT
+    // VISTA CHAT (Sin cambios mayores, solo integración)
     const renderChatInterface = (chatList) => (
         <div className="flex flex-1 gap-0 overflow-hidden bg-white rounded-2xl shadow-xl border border-slate-200 h-full animate-enter">
             {/* Lista Chats */}
@@ -618,7 +652,7 @@ window.Views.Messaging = ({ userProfile }) => {
                                 <div className="bg-white/80 p-4 rounded-xl border border-amber-100 text-sm text-slate-700 whitespace-pre-wrap mt-4 text-left">{selectedBroadcast.body}</div>
                                 <div className="mt-6 flex flex-col items-center gap-2">
                                     <button onClick={()=>handlePray(selectedBroadcast.id)} className={`px-8 py-3 rounded-full font-bold transition-all shadow-lg transform hover:scale-105 flex items-center gap-2 ${selectedBroadcast.prayedBy?.includes(userProfile.id) ? 'bg-amber-600 text-white' : 'bg-white border border-amber-300 text-amber-600 hover:bg-amber-50'}`}>
-                                        🙏 {selectedBroadcast.prayedBy?.includes(userProfile.id) ? 'Ya oraste' : 'Oraré por esto'}
+                                            🙏 {selectedBroadcast.prayedBy?.includes(userProfile.id) ? 'Ya oraste' : 'Oraré por esto'}
                                     </button>
                                     <p className="text-xs text-amber-700 font-bold">{selectedBroadcast.prayedBy?.length || 0} personas están orando</p>
                                 </div>
@@ -650,8 +684,8 @@ window.Views.Messaging = ({ userProfile }) => {
                                                 const voted = opt.votes?.includes(userProfile.id);
                                                 return (
                                                     <div key={i} onClick={()=>handleVote(selectedBroadcast.id, i)} className={`relative p-3 rounded-xl border cursor-pointer overflow-hidden transition-all ${voted ? 'border-brand-500 ring-1 ring-brand-500' : 'border-slate-200 bg-white'}`}>
-                                                        <div className={`absolute left-0 top-0 bottom-0 ${voted ? 'bg-brand-600' : 'bg-slate-100'}`} style={{width:`${pct}%`, opacity: voted ? 1 : 1}}></div>
-                                                        <div className={`relative flex justify-between z-10 font-bold text-sm ${voted ? 'text-white' : 'text-slate-700'}`}><span>{opt.text}</span><span>{pct}%</span></div>
+                                                            <div className={`absolute left-0 top-0 bottom-0 ${voted ? 'bg-brand-600' : 'bg-slate-100'}`} style={{width:`${pct}%`, opacity: voted ? 1 : 1}}></div>
+                                                            <div className={`relative flex justify-between z-10 font-bold text-sm ${voted ? 'text-white' : 'text-slate-700'}`}><span>{opt.text}</span><span>{pct}%</span></div>
                                                     </div>
                                                 );
                                             })}
@@ -661,14 +695,26 @@ window.Views.Messaging = ({ userProfile }) => {
                             </>
                         )}
                         
+                        {/* ERROR 5: BARRA DE REACCIONES DENTRO DEL MODAL (RECUPERADO) */}
+                        <div className="flex items-center justify-between border-t border-b py-3 mt-4">
+                             <div className="flex gap-4">
+                                {['👍','❤️','🙏','🔥'].map(em => (
+                                    <button key={em} onClick={()=>handleReaction(selectedBroadcast.id, em)} className={`text-2xl transition-transform hover:scale-125 ${selectedBroadcast.reactions?.[userProfile.id]===em ? 'opacity-100 scale-110' : 'opacity-50 grayscale hover:grayscale-0'}`}>
+                                        {em}
+                                    </button>
+                                ))}
+                             </div>
+                             <span className="text-xs text-slate-400 cursor-pointer hover:underline" onClick={()=>setViewersModal(selectedBroadcast)}>{selectedBroadcast.readBy?.length} vistos</span>
+                        </div>
+
                         {(isAdmin || selectedBroadcast.from === userProfile.id) && (
-                            <div className="flex justify-end gap-2 mt-4 pt-2 border-t">
+                            <div className="flex justify-end gap-2 mt-4 pt-2">
                                 <button onClick={()=>handleDeleteMessage(selectedBroadcast.id, selectedBroadcast.from)} className="text-xs text-red-600 font-bold flex gap-1 items-center"><Icon name="Trash" size={12}/> Eliminar</button>
                             </div>
                         )}
 
                         {selectedBroadcast.allowReplies !== false && (
-                            <div className="border-t pt-4">
+                            <div className="pt-4">
                                 <h4 className="font-bold text-sm mb-3">Comentarios</h4>
                                 <div className="space-y-3 max-h-48 overflow-y-auto mb-3">
                                     {(selectedBroadcast.replies || []).map((r, i) => (
@@ -690,13 +736,27 @@ window.Views.Messaging = ({ userProfile }) => {
                         <div onClick={()=>setComposeForm(p=>({...p, context: 'individual', category: 'General'}))} className={`p-4 rounded-xl border-2 cursor-pointer text-center ${composeForm.context!=='broadcast'?'border-brand-500 bg-brand-50':'border-slate-200'}`}><Icon name="MessageCircle" className="mx-auto mb-1"/><span className="text-xs font-bold">Mensaje / Chat</span></div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {composeForm.context === 'broadcast' ? (
                             <Select label="Categoría" value={composeForm.category} onChange={e=>setComposeForm({...composeForm, category:e.target.value})}>
                                 {['General', 'Aviso', 'Reunión', 'Urgente', 'Devocional', 'Oración'].map(c => <option key={c} value={c}>{c}</option>)}
                             </Select>
                         ) : (
-                            <Select label="Destino" value={composeForm.to} onChange={e=>setComposeForm({...composeForm, to:e.target.value})}><option value="">Seleccionar...</option>{members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</Select>
+                            <>
+                                {/* ERROR 1: SELECTOR DE TIPO (Persona, Ministerio, Grupo) */}
+                                <Select label="Tipo Destinatario" value={composeForm.recipientType} onChange={e=>setComposeForm({...composeForm, recipientType:e.target.value, to: ''})}>
+                                    <option value="member">Persona</option>
+                                    <option value="ministry">Ministerio</option>
+                                    <option value="group">Grupo Personalizado</option>
+                                </Select>
+
+                                <Select label="Seleccionar" value={composeForm.to} onChange={e=>setComposeForm({...composeForm, to:e.target.value})}>
+                                    <option value="">Seleccionar...</option>
+                                    {composeForm.recipientType === 'member' && members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+                                    {composeForm.recipientType === 'ministry' && uniqueMinistries.map(m=><option key={m} value={m}>{m}</option>)}
+                                    {composeForm.recipientType === 'group' && groups.map(g=><option key={g.id} value={g.id}>{g.name}</option>)}
+                                </Select>
+                            </>
                         )}
                     </div>
 
@@ -712,7 +772,21 @@ window.Views.Messaging = ({ userProfile }) => {
                     
                     {composeForm.hasLink && <div className="space-y-2"><Input label="Título del Botón" value={composeForm.linkTitle} onChange={e=>setComposeForm({...composeForm, linkTitle:e.target.value})} placeholder="Ej: Unirme al Meet"/><Input label="URL (https://...)" value={composeForm.linkUrl} onChange={e=>setComposeForm({...composeForm, linkUrl:e.target.value})}/></div>}
 
-                    <div className="flex gap-2"><label className="flex-1 p-3 border rounded-xl flex justify-center items-center gap-2 cursor-pointer hover:bg-slate-50"><Icon name="Image"/> {isUploading?'...':(composeForm.attachmentUrl?'Adjunto OK':'Foto/PDF')}<input type="file" className="hidden" onChange={handleImage}/></label></div>
+                    {/* ERROR 3: Fecha programada y eliminación de adjunto */}
+                    <Input type="datetime-local" label="Programar para (Opcional)" value={composeForm.scheduledAt} onChange={e=>setComposeForm({...composeForm, scheduledAt:e.target.value})}/>
+
+                    <div className="flex gap-2 items-center">
+                        <label className="flex-1 p-3 border rounded-xl flex justify-center items-center gap-2 cursor-pointer hover:bg-slate-50">
+                            <Icon name="Image"/> {isUploading?'...':(composeForm.attachmentUrl?'Adjunto Listo':'Foto/PDF')}
+                            <input type="file" className="hidden" onChange={handleImage}/>
+                        </label>
+                        {composeForm.attachmentUrl && (
+                            <button onClick={handleRemoveAttachment} className="p-3 bg-red-100 text-red-600 rounded-xl hover:bg-red-200">
+                                <Icon name="X"/>
+                            </button>
+                        )}
+                    </div>
+
                     {composeForm.context === 'broadcast' && (
                         <div className="flex items-center gap-4 pt-2 border-t mt-2">
                             <label className="flex items-center gap-2 text-xs cursor-pointer select-none"><input type="checkbox" checked={composeForm.isPinned} onChange={e=>setComposeForm({...composeForm, isPinned:e.target.checked})} className="rounded text-brand-600 focus:ring-brand-500"/> Fijar Aviso</label>
