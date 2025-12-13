@@ -92,13 +92,6 @@
     <script type="text/babel" src="src/DataLogic.js"></script>
     <!-- AGREGA ESTA LÍNEA AQUÍ ABAJO -->
     <script type="text/babel" src="src/NotificationLogic.js"></script> 
-    // Busca donde está el botón de Logout en tu sidebar y agrega esto:
-    <button 
-        onClick={() => window.NotificationLogic.requestPermission(userProfile)} 
-        className="mt-4 w-full bg-blue-50 text-blue-600 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-blue-100 shadow-sm"
-    >
-        <Utils.Icon name="Bell" size={16}/> Activar Notificaciones
-    </button>
     <script type="text/babel" src="src/views/Landing.js"></script>
     
     <script type="text/babel" src="src/views/GlobalCalendar.js"></script>
@@ -249,6 +242,10 @@
                                 <div className="flex items-center gap-3 overflow-hidden"><img src={userProfile.photo} className="w-10 h-10 rounded-full bg-slate-200 object-cover"/><div className="leading-tight overflow-hidden"><p className="font-bold text-sm text-slate-800 truncate w-24">{userProfile.name}</p><p className="text-[10px] text-slate-500 uppercase font-bold">{userProfile.role}</p></div></div>
                                 <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors p-2">{Icon && <Icon name="LogOut"/>}</button>
                             </div>
+                            {/* BOTÓN DE NOTIFICACIONES */}
+                                <button onClick={() => window.NotificationLogic.requestPermission(userProfile)} className="w-full bg-brand-50 text-brand-600 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-brand-100 hover:bg-brand-100 transition-colors">
+                                    {Icon && <Icon name="Bell" size={14}/>} Activar Notificaciones
+                                </button>
                         </div>
                     </aside>
                     <main className="flex-1 flex flex-col h-screen overflow-hidden relative w-full">
