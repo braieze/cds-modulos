@@ -19,10 +19,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     
-    <!-- Firebase -->
+    <!-- Firebase (COMPAT) - NOTA: Se agregó messaging aquí abajo -->
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js"></script>
 
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
@@ -72,28 +73,33 @@
         window.auth = firebase.auth();
         window.googleProvider = new firebase.auth.GoogleAuthProvider();
         
+        // Registro del Service Worker
         if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('./service-worker.js')
-        .then((registration) => {
-            console.log('Service Worker registrado con éxito:', registration);
-            
-            // --- AQUÍ CONECTAMOS FIREBASE CON TU SERVICE WORKER ---
-            const messaging = firebase.messaging();
-            messaging.useServiceWorker(registration);
-            
-            // Luego aquí puedes llamar a la función de pedir permisos (DataLogic.initializeNotifications)
-        })
-        .catch((err) => console.log('Error registro SW:', err));
-    }
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./service-worker.js')
+                .then((registration) => {
+                    console.log('Service Worker registrado con éxito:', registration);
+                    
+                    // Conectar Firebase Messaging con el SW
+                    try {
+                        const messaging = firebase.messaging();
+                        messaging.useServiceWorker(registration);
+                    } catch (e) {
+                        console.log("Messaging no disponible en este navegador o contexto inseguro.");
+                    }
+                })
+                .catch((err) => console.log('Error registro SW:', err));
+            });
+        }
     </script>
 
     <!-- Carga de Módulos -->
     <script type="text/babel" src="src/Utils.js"></script>
     <script type="text/babel" src="src/DataLogic.js"></script>
-    <!-- AGREGA ESTA LÍNEA AQUÍ ABAJO -->
+    <!-- IMPORTANTE: Lógica de Notificaciones -->
     <script type="text/babel" src="src/NotificationLogic.js"></script> 
-    <script type="text/babel" src="src/views/Landing.js"></script>
     
+    <script type="text/babel" src="src/views/Landing.js"></script>
     <script type="text/babel" src="src/views/GlobalCalendar.js"></script>
     <script type="text/babel" src="src/views/EventDetails.js"></script>
     <script type="text/babel" src="src/views/Dashboard.js"></script>
@@ -116,7 +122,7 @@
         const { useFirebaseListeners, addData, updateData, deleteData } = DataLogic;
         const Views = window.Views || {};
         
-        // Importación de TODAS las vistas (incluyendo Landing y Visits)
+        // Importación de TODAS las vistas
         const { Landing, Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging, Blog, QuickActions, Visits } = Views;
 
         const LoginScreen = ({ onLogin, onBack, loading, error }) => (
@@ -136,7 +142,6 @@
         );
 
         const App = () => {
-            // ESTADO DE NAVEGACIÓN: 'landing' (web) | 'login' | 'system' (app)
             const [viewMode, setViewMode] = useState('landing');
             
             const [currentUser, setCurrentUser] = useState(null);
@@ -163,7 +168,6 @@
                 ebd: setEbd, youth: setYouth, tasks: setTasks, servers: setServers, messages: setMessages, posts: setPosts
             };
 
-            // Auth Listener
             useEffect(() => {
                 const unsubscribe = window.auth.onAuthStateChanged(async (user) => {
                     if (user) {
@@ -173,9 +177,8 @@
                             const snapshot = await q.get();
                             if (!snapshot.empty) {
                                 setUserProfile({ ...snapshot.docs[0].data(), id: snapshot.docs[0].id });
-                                setViewMode('system'); // Entrar directo si ya está logueado
+                                setViewMode('system');
                             } else {
-                                // Auto-registro si no existe
                                 const checkEmpty = await window.db.collection('members').get();
                                 if(checkEmpty.empty) {
                                     const admin = { name: user.displayName, email: user.email, role: 'Pastor', ministry: 'General', photo: user.photoURL, status: 'Activo' };
@@ -184,14 +187,13 @@
                                     setViewMode('system');
                                 } else {
                                     setAuthError("Tu email no está registrado en el sistema.");
-                                    setViewMode('login'); // Quedarse en login con error
+                                    setViewMode('login');
                                 }
                             }
                         } catch(e) { setAuthError("Error de red"); }
                     } else { 
                         setCurrentUser(null); 
                         setUserProfile(null); 
-                        // No forzar landing aquí para permitir navegación manual
                     }
                     setLoadingAuth(false);
                 });
@@ -203,14 +205,12 @@
             const handleLogin = async () => { try { await window.auth.signInWithPopup(window.googleProvider); } catch(e) { setAuthError("Error Google"); } };
             const handleLogout = () => { window.auth.signOut(); setViewMode('landing'); };
 
-            // Renderizado Condicional
             if (loadingAuth) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse bg-slate-50">Cargando...</div>;
 
             if (viewMode === 'landing') return <Landing onEnterSystem={() => setViewMode(currentUser ? 'system' : 'login')} />;
             
             if (viewMode === 'login') return <LoginScreen onLogin={handleLogin} onBack={()=>setViewMode('landing')} loading={false} error={authError} />;
 
-            // SISTEMA INTERNO
             const NavItem = ({ id, label, icon }) => (
                 <button onClick={() => { setActiveTab(id); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all mb-1 ${activeTab === id ? 'bg-brand-50 text-brand-600 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
                     {Icon && <Icon name={icon} />} {label}
@@ -238,14 +238,21 @@
                                 {['Pastor', 'Líder', 'Servidor'].includes(userProfile.role) && <NavItem id="visits" icon="MapPin" label="Visitas Pastoral" />}
                                 <NavItem id="messages" icon="Mail" label="Mensajería" />
                             </nav>
-                            <div className="mt-auto pt-6 border-t border-slate-100 flex items-center justify-between">
-                                <div className="flex items-center gap-3 overflow-hidden"><img src={userProfile.photo} className="w-10 h-10 rounded-full bg-slate-200 object-cover"/><div className="leading-tight overflow-hidden"><p className="font-bold text-sm text-slate-800 truncate w-24">{userProfile.name}</p><p className="text-[10px] text-slate-500 uppercase font-bold">{userProfile.role}</p></div></div>
-                                <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors p-2">{Icon && <Icon name="LogOut"/>}</button>
-                            </div>
-                            {/* BOTÓN DE NOTIFICACIONES */}
-                                <button onClick={() => window.NotificationLogic.requestPermission(userProfile)} className="w-full bg-brand-50 text-brand-600 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-brand-100 hover:bg-brand-100 transition-colors">
+                            
+                            {/* PERFIL Y BOTÓN DE NOTIFICACIONES */}
+                            <div className="mt-auto pt-6 border-t border-slate-100 flex flex-col gap-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3 overflow-hidden"><img src={userProfile.photo} className="w-10 h-10 rounded-full bg-slate-200 object-cover"/><div className="leading-tight overflow-hidden"><p className="font-bold text-sm text-slate-800 truncate w-24">{userProfile.name}</p><p className="text-[10px] text-slate-500 uppercase font-bold">{userProfile.role}</p></div></div>
+                                    <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors p-2">{Icon && <Icon name="LogOut"/>}</button>
+                                </div>
+                                
+                                <button 
+                                    onClick={() => window.NotificationLogic && window.NotificationLogic.requestPermission(userProfile)} 
+                                    className="w-full bg-brand-50 text-brand-600 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-brand-100 hover:bg-brand-100 transition-all active:scale-95 shadow-sm"
+                                >
                                     {Icon && <Icon name="Bell" size={14}/>} Activar Notificaciones
                                 </button>
+                            </div>
                         </div>
                     </aside>
                     <main className="flex-1 flex flex-col h-screen overflow-hidden relative w-full">
