@@ -1,5 +1,5 @@
 window.NotificationLogic = {
-    // Tu clave real que me pasaste recién
+    // Tu clave real de Firebase Console
     VAPID_KEY: "BHfJ1SQOqfljjMHYhfhYeEii6KSzooMUTIXDd5AT6g48qWj5l6uG5d6n-ZdyShPQM4xiAGM0kALUZwVQ-0an6KA", 
 
     requestPermission: async (userProfile) => {
@@ -9,11 +9,11 @@ window.NotificationLogic = {
         }
 
         try {
-            // 1. Pedir permiso (Debe ser activado por un click)
+            // 1. Pedir permiso explícito al usuario
             const permission = await Notification.requestPermission();
             
             if (permission === 'granted') {
-                window.Utils.notify("Permiso concedido. Configurando...", "success");
+                window.Utils.notify("Permiso concedido. Obteniendo credenciales...", "success");
 
                 const messaging = firebase.messaging();
                 
@@ -30,17 +30,17 @@ window.NotificationLogic = {
                             deviceType: /iPhone|iPad|iPod/.test(navigator.userAgent) ? 'iOS' : 'Android',
                             updatedAt: new Date().toISOString()
                         });
-                        window.Utils.notify("¡Notificaciones Activadas!", "success");
+                        window.Utils.notify("¡Notificaciones Activadas con Éxito!", "success");
                     }
                 } else {
                     window.Utils.notify("No se pudo obtener el token ID.", "error");
                 }
             } else {
-                window.Utils.notify("Permiso denegado. Habilítalo en la configuración.", "error");
+                window.Utils.notify("Permiso denegado. Habilítalo en Configuración > Safari > Avanzado (o Configuración de la Web App en Inicio).", "error");
             }
         } catch (error) {
             console.error("Error notificaciones:", error);
-            window.Utils.notify("Error: " + error.message, "error");
+            window.Utils.notify("Error al activar: " + error.message, "error");
         }
     }
 };
