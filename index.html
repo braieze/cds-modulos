@@ -90,6 +90,15 @@
     <!-- Carga de Módulos -->
     <script type="text/babel" src="src/Utils.js"></script>
     <script type="text/babel" src="src/DataLogic.js"></script>
+    <!-- AGREGA ESTA LÍNEA AQUÍ ABAJO -->
+    <script type="text/babel" src="src/NotificationLogic.js"></script> 
+    // Busca donde está el botón de Logout en tu sidebar y agrega esto:
+    <button 
+        onClick={() => window.NotificationLogic.requestPermission(userProfile)} 
+        className="mt-4 w-full bg-blue-50 text-blue-600 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-blue-100 shadow-sm"
+    >
+        <Utils.Icon name="Bell" size={16}/> Activar Notificaciones
+    </button>
     <script type="text/babel" src="src/views/Landing.js"></script>
     
     <script type="text/babel" src="src/views/GlobalCalendar.js"></script>
