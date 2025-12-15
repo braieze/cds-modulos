@@ -3,7 +3,7 @@ window.Views = window.Views || {};
 window.Views.Finances = ({ finances, addData, userProfile }) => {
     const { useState, useMemo, useEffect, useRef } = React;
     const Utils = window.Utils || {};
-    const { Button, Modal, Input, Select, DateFilter, formatCurrency, formatDate, Icon, SmartSelect, compressImage, Badge } = Utils;
+    const { Button, Modal, Input, Select, DateFilter, formatCurrency, formatDate, Icon, SmartSelect, compressImage } = Utils;
 
     // --- ESTADOS ---
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -14,9 +14,7 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
     // Privacy & UX
     const [showBalance, setShowBalance] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [filterType, setFilterType] = useState('all'); // 'all', 'income', 'expense'
-    
-    // Accordion State
+    const [filterType, setFilterType] = useState('all');
     const [expandedId, setExpandedId] = useState(null);
 
     // Selección Múltiple
@@ -27,51 +25,52 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
     const [pinInput, setPinInput] = useState('');
     const [errorPin, setErrorPin] = useState(false);
 
-    // Formulario
+    // Formularios
     const initialForm = { type: 'Culto', date: Utils.getLocalDate(), tithesCash: '', tithesTransfer: '', offeringsCash: '', offeringsTransfer: '', amount: '', category: 'General', method: 'Efectivo', notes: '', attachmentUrl: '' };
     const [form, setForm] = useState(initialForm);
 
-    // Metas
-    const [goals, setGoals] = useState(() => JSON.parse(localStorage.getItem('finance_goals')) || {});
+    // Metas (Persistencia Local)
+    const [goals, setGoals] = useState(() => JSON.parse(localStorage.getItem('finance_goals_v2')) || []);
     const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
-    const [goalForm, setGoalForm] = useState({ category: '', amount: '' });
+    // Goal Form: type='saving' (Ingreso/Recaudación) | 'spending' (Límite Gasto)
+    const [goalForm, setGoalForm] = useState({ id: null, category: '', amount: '', type: 'spending', label: '' });
 
-    // Referencias PDF/CSV
+    // Referencias PDF y Gráficos
     const printRef = useRef(null);
     const [pdfData, setPdfData] = useState(null);
-
-    // Chart Refs
     const lineChartRef = useRef(null);
     const pieChartRef = useRef(null);
     const chartInstances = useRef({});
 
+    // Categorías Extendidas
     const categories = [
         { value: 'General', label: 'General / Varios', icon: 'Info', color: '#94a3b8' },
         { value: 'Mantenimiento', label: 'Infraestructura', icon: 'Briefcase', color: '#f59e0b' },
-        { value: 'Honorarios', label: 'Honorarios', icon: 'Users', color: '#3b82f6' },
+        { value: 'Honorarios', label: 'Honorarios / Sueldos', icon: 'Users', color: '#3b82f6' },
         { value: 'Alquiler', label: 'Alquiler', icon: 'Home', color: '#ef4444' },
         { value: 'Ayuda Social', label: 'Ayuda Social', icon: 'Smile', color: '#10b981' },
         { value: 'Ministerios', label: 'Ministerios', icon: 'Music', color: '#8b5cf6' },
-        { value: 'Ofrenda Misionera', label: 'Misiones', icon: 'Globe', color: '#ec4899' }
+        { value: 'Ofrenda Misionera', label: 'Misiones', icon: 'Globe', color: '#ec4899' },
+        { value: 'Diezmos', label: 'Diezmos (Ingreso)', icon: 'TrendingUp', color: '#6366f1' },
+        { value: 'Ofrendas', label: 'Ofrendas (Ingreso)', icon: 'Gift', color: '#8b5cf6' }
     ];
 
-    // --- CÁLCULOS ---
+    // --- HELPERS ---
     const safeNum = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+    const blurClass = showBalance ? '' : 'filter blur-md select-none transition-all duration-500';
 
-    // 1. Filtrado de Datos
+    // --- DATA PROCESSING ---
     const monthlyData = useMemo(() => {
         if (!finances) return [];
         const m = currentDate.toISOString().slice(0, 7);
         return finances
             .filter(f => f.date && f.date.startsWith(m))
             .filter(f => {
-                // Filtro Texto
                 if (searchTerm) {
                     const term = searchTerm.toLowerCase();
                     const matches = (f.category||'').toLowerCase().includes(term) || (f.notes||'').toLowerCase().includes(term);
                     if (!matches) return false;
                 }
-                // Filtro Tipo (Chip)
                 if (filterType === 'income') return safeNum(f.total || f.amount) > 0;
                 if (filterType === 'expense') return safeNum(f.total || f.amount) < 0;
                 return true;
@@ -79,56 +78,15 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
             .sort((a,b) => new Date(b.date) - new Date(a.date));
     }, [finances, currentDate, searchTerm, filterType]);
 
-    // 2. Totales Mes Actual
     const monthTotals = useMemo(() => {
         let incomes = 0, expenses = 0;
         monthlyData.forEach(f => {
             const val = safeNum(f.total || f.amount);
-            if (val > 0) incomes += val;
-            else expenses += Math.abs(val);
+            if (val > 0) incomes += val; else expenses += Math.abs(val);
         });
         return { incomes, expenses, net: incomes - expenses };
     }, [monthlyData]);
 
-    // 3. Comparativa Mes Anterior (Smart Insights)
-    const prevMonthTotals = useMemo(() => {
-        if (!finances) return { incomes: 0, expenses: 0 };
-        const d = new Date(currentDate);
-        d.setMonth(d.getMonth() - 1);
-        const prevM = d.toISOString().slice(0, 7);
-        
-        let incomes = 0, expenses = 0;
-        finances.filter(f => f.date && f.date.startsWith(prevM)).forEach(f => {
-            const val = safeNum(f.total || f.amount);
-            if (val > 0) incomes += val; else expenses += Math.abs(val);
-        });
-        return { incomes, expenses };
-    }, [finances, currentDate]);
-
-    const getGrowth = (current, prev) => {
-        if (prev === 0) return current > 0 ? 100 : 0;
-        return Math.round(((current - prev) / prev) * 100);
-    };
-
-    // 4. Saldos Globales
-    const globalBalances = useMemo(() => {
-        let cash = 0, bank = 0;
-        if (finances) {
-            finances.forEach(f => {
-                let val = 0;
-                if (f.type === 'Culto') {
-                    cash += safeNum(f.tithesCash)+safeNum(f.offeringsCash);
-                    bank += safeNum(f.tithesTransfer)+safeNum(f.offeringsTransfer);
-                } else {
-                    val = safeNum(f.amount);
-                    if (f.method === 'Banco') bank += val; else cash += val;
-                }
-            });
-        }
-        return { cash, bank, total: cash + bank };
-    }, [finances]);
-
-    // 5. Chart Data
     const chartData = useMemo(() => {
         if (!finances) return { trend: [], pie: [] };
         const trendMap = {};
@@ -147,7 +105,6 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
             }
         });
         const pieMap = {};
-        // Usamos monthlyData sin filtros de tipo para el gráfico, pero sí de mes
         const currentM = currentDate.toISOString().slice(0,7);
         finances.filter(f => f.date.startsWith(currentM) && safeNum(f.total||f.amount) < 0).forEach(f => {
             const c = f.category || 'General';
@@ -159,66 +116,62 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         };
     }, [monthlyData, currentDate, finances]);
 
-    // --- CHART.JS CONFIG ---
+    // --- CHARTS ---
     useEffect(() => {
         const Chart = window.Chart;
         if (tabView !== 'dashboard' || !Chart) return;
-        Chart.defaults.color = '#94a3b8';
-        Chart.defaults.borderColor = '#334155';
+        Chart.defaults.color = '#94a3b8'; Chart.defaults.borderColor = 'rgba(255,255,255,0.05)';
         Object.values(chartInstances.current).forEach(c => c.destroy());
 
         if (lineChartRef.current) {
+            const gradientStroke = lineChartRef.current.getContext('2d').createLinearGradient(0, 0, 0, 400);
+            gradientStroke.addColorStop(0, '#818cf8'); gradientStroke.addColorStop(1, '#c084fc');
+
             chartInstances.current.line = new Chart(lineChartRef.current, {
                 type: 'line',
                 data: {
                     labels: chartData.trend.map(d => d.label),
                     datasets: [
-                        { label: 'Ingresos', data: chartData.trend.map(d => d.ingresos), borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', fill: true, tension: 0.4 },
-                        { label: 'Gastos', data: chartData.trend.map(d => d.gastos), borderColor: '#f43f5e', backgroundColor: 'rgba(244, 63, 94, 0.1)', fill: true, tension: 0.4 }
+                        { label: 'Neto', data: chartData.trend.map(d => d.ingresos - d.gastos), borderColor: '#c084fc', backgroundColor: 'rgba(192, 132, 252, 0.1)', fill: true, tension: 0.4, pointBackgroundColor: '#fff', pointBorderColor: '#c084fc' }
                     ]
                 },
-                options: { 
-                    responsive: true, maintainAspectRatio: false, 
-                    plugins: { legend: { labels: { color: '#cbd5e1' } } },
-                    scales: { x: { grid: { display: false } }, y: { grid: { color: '#1e293b' } } } 
-                }
-            });
-        }
-        if (pieChartRef.current && chartData.pie.length > 0) {
-            chartInstances.current.pie = new Chart(pieChartRef.current, {
-                type: 'doughnut',
-                data: {
-                    labels: chartData.pie.map(d => d.name),
-                    datasets: [{ 
-                        data: chartData.pie.map(d => d.value), 
-                        backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899'],
-                        borderWidth: 0
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false, cutout: '75%', plugins: { legend: { position: 'right', labels: { color: '#cbd5e1' } } } }
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { display: false } } }
             });
         }
         return () => Object.values(chartInstances.current).forEach(c => c.destroy());
     }, [chartData, tabView]);
 
-    // --- ACCIONES ---
+    // --- ACTIONS ---
     const handleUnlock = (e) => { e.preventDefault(); if (pinInput === '1234') { setIsLocked(false); setErrorPin(false); } else { setErrorPin(true); setPinInput(''); } };
     
-    const handleImage = async (e) => { const f=e.target.files[0]; if(!f)return; setIsUploading(true); try{const b=await compressImage(f); setForm(p=>({...p, attachmentUrl:b}));}catch(err){Utils.notify("Error subida","error");} setIsUploading(false); };
+    const toggleSelect = (id) => { if (selectedIds.includes(id)) setSelectedIds(prev => prev.filter(i => i !== id)); else setSelectedIds(prev => [...prev, id]); };
+    const selectAll = () => { if (selectedIds.length === monthlyData.length) setSelectedIds([]); else setSelectedIds(monthlyData.map(d => d.id)); };
     
+    const handleBulkDelete = async () => {
+        if(!confirm(`¿ELIMINAR ${selectedIds.length} ELEMENTOS? Esta acción no se puede deshacer.`)) return;
+        const batch = window.db.batch();
+        selectedIds.forEach(id => batch.delete(window.db.collection('finances').doc(id)));
+        await batch.commit();
+        setSelectedIds([]);
+        Utils.notify("Elementos eliminados exitosamente");
+    };
+
     const handleSave = () => { 
         let f = {...form, createdAt: new Date().toISOString() };
         if(form.type==='Culto') {
             const t = safeNum(form.tithesCash)+safeNum(form.tithesTransfer)+safeNum(form.offeringsCash)+safeNum(form.offeringsTransfer);
-            if(t===0) return Utils.notify("Total 0", "error");
+            if(t===0) return Utils.notify("El total no puede ser 0", "error");
             f.total = t; f.category = 'Culto';
         } else {
-            const a = safeNum(form.amount); if(a===0) return Utils.notify("Monto 0", "error");
+            const a = safeNum(form.amount); if(a===0) return Utils.notify("Ingrese un monto válido", "error");
             const v = Math.abs(a); f.amount = form.type==='Gasto'?-v:v; f.total = f.amount;
         }
-        addData('finances', f); setIsModalOpen(false); setForm(initialForm); Utils.notify("Registrado");
+        addData('finances', f); setIsModalOpen(false); setForm(initialForm); Utils.notify("Movimiento registrado");
     };
 
+    const handleImage = async (e) => { const f=e.target.files[0]; if(!f)return; setIsUploading(true); try{const b=await compressImage(f); setForm(p=>({...p, attachmentUrl:b}));}catch(err){Utils.notify("Error subida","error");} setIsUploading(false); };
+
+    // --- EXPORTAR A CSV (Recuperado) ---
     const handleExportCSV = () => {
         const headers = ["ID", "Fecha", "Tipo", "Categoría", "Detalle", "Monto", "Método", "Nota"];
         const rows = monthlyData.map(f => [
@@ -241,387 +194,413 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         document.body.removeChild(link);
     };
 
-    const toggleSelect = (id) => { if (selectedIds.includes(id)) setSelectedIds(prev => prev.filter(i => i !== id)); else setSelectedIds(prev => [...prev, id]); };
-    const handleBulkDelete = async () => { if(!confirm(`¿Borrar ${selectedIds.length}?`)) return; const batch = window.db.batch(); selectedIds.forEach(id => batch.delete(window.db.collection('finances').doc(id))); await batch.commit(); setSelectedIds([]); Utils.notify("Eliminados"); };
-    
-    // PDF Logic (Sin cambios mayores, solo optimización)
+    // --- EXPORTAR A PDF (Recuperado) ---
     const handleExportPDF = (item) => {
         setPdfData(item);
         setTimeout(async () => {
             const el = printRef.current;
             el.style.display = 'block';
-            if (window.html2pdf) await window.html2pdf().set({ margin:0, filename:`Comprobante.pdf`, image:{type:'jpeg',quality:0.98}, html2canvas:{scale:3}, jsPDF:{unit:'mm',format:[100,150]} }).from(el).save();
+            if (window.html2pdf) {
+                await window.html2pdf().set({ 
+                    margin:0, 
+                    filename:`Comprobante_${item.id.slice(0,6)}.pdf`, 
+                    image:{type:'jpeg',quality:0.98}, 
+                    html2canvas:{scale:3, useCORS: true}, 
+                    jsPDF:{unit:'mm',format:[100,150], orientation: 'portrait'} 
+                }).from(el).save();
+            } else {
+                alert("Librería PDF no cargada aún. Intente de nuevo.");
+            }
             el.style.display = 'none';
         }, 500);
     };
 
-    // Metas
+    // --- METAS LOGIC ---
     const handleSaveGoal = () => {
-        const newGoals = { ...goals, [goalForm.category]: safeNum(goalForm.amount) };
+        let newGoals;
+        if (goalForm.id) { // Edit
+            newGoals = goals.map(g => g.id === goalForm.id ? { ...g, ...goalForm, id: goalForm.id } : g);
+        } else { // Create
+            newGoals = [...goals, { ...goalForm, id: Date.now().toString() }];
+        }
         setGoals(newGoals);
-        localStorage.setItem('finance_goals', JSON.stringify(newGoals));
+        localStorage.setItem('finance_goals_v2', JSON.stringify(newGoals));
         setIsGoalModalOpen(false);
-        Utils.notify("Meta actualizada");
+        Utils.notify("Meta guardada");
     };
 
-    // Render Helpers
+    const handleDeleteGoal = (id) => {
+        if(!confirm("¿Borrar esta meta?")) return;
+        const newGoals = goals.filter(g => g.id !== id);
+        setGoals(newGoals);
+        localStorage.setItem('finance_goals_v2', JSON.stringify(newGoals));
+        setIsGoalModalOpen(false); // Cierra el modal si estaba abierto
+    };
+
+    const openGoalModal = (goal = null) => {
+        if (goal) setGoalForm(goal);
+        else setGoalForm({ id: null, category: '', amount: '', type: 'spending', label: '' });
+        setIsGoalModalOpen(true);
+    };
+
+    const getGoalProgress = (goal) => {
+        const target = safeNum(goal.amount);
+        let current = 0;
+        
+        monthlyData.forEach(f => {
+            const val = safeNum(f.total || f.amount);
+            // Gasto: suma negativos
+            if (goal.type === 'spending' && val < 0 && (f.category === goal.category || (goal.category === 'Culto' && f.type === 'Culto'))) {
+                current += Math.abs(val);
+            }
+            // Ahorro: suma positivos
+            if (goal.type === 'saving' && val > 0 && (f.category === goal.category || (goal.category === 'Culto' && f.type === 'Culto'))) {
+                current += val;
+            }
+        });
+
+        const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
+        return { current, target, pct };
+    };
+
+    // --- RENDER ---
     if (userProfile?.role !== 'Pastor') return <div className="h-full flex items-center justify-center text-slate-500">Acceso Restringido</div>;
     
-    // Privacy Filter Class
-    const blurClass = showBalance ? '' : 'filter blur-md select-none transition-all duration-500';
-
     if (isLocked) return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f172a] animate-enter">
-            <div className="bg-[#1e293b] p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center border border-slate-700">
-                <div className="bg-gradient-to-tr from-brand-600 to-indigo-600 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-lg shadow-indigo-500/30">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050511] animate-enter bg-[url('https://grainy-gradients.vercel.app/noise.svg')]">
+            <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/40 via-purple-900/20 to-black pointer-events-none"></div>
+            <div className="relative bg-white/5 backdrop-blur-2xl p-8 rounded-[32px] shadow-2xl border border-white/10 max-w-sm w-full text-center">
+                <div className="bg-gradient-to-tr from-indigo-500 to-purple-600 w-20 h-20 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-[0_0_40px_rgba(139,92,246,0.5)]">
                     <Icon name="Lock" size={32}/>
                 </div>
-                <h2 className="text-2xl font-extrabold text-white mb-2">Acceso Seguro</h2>
+                <h2 className="text-3xl font-black text-white mb-2 tracking-tight">Bienvenido</h2>
+                <p className="text-slate-400 mb-8">Tesorería Digital</p>
                 <form onSubmit={handleUnlock}>
-                    <div className="flex justify-center gap-2 mb-6">
+                    <div className="flex justify-center gap-4 mb-8">
                         {[0,1,2,3].map(i => (
-                            <div key={i} className={`w-4 h-4 rounded-full transition-all ${pinInput.length > i ? 'bg-indigo-500 scale-110' : 'bg-slate-700'}`}></div>
+                            <div key={i} className={`w-3 h-3 rounded-full transition-all duration-300 ${pinInput.length > i ? 'bg-indigo-400 scale-125 shadow-[0_0_10px_#818cf8]' : 'bg-white/10'}`}></div>
                         ))}
                     </div>
-                    <input type="password" maxLength="4" autoFocus className="opacity-0 absolute" value={pinInput} onChange={e=>setPinInput(e.target.value)} />
-                    <div className="grid grid-cols-3 gap-3">
-                        {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} type="button" onClick={()=>setPinInput(p=> (p+n).slice(0,4))} className="h-14 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xl transition-colors">{n}</button>)}
+                    <input type="password" maxLength="4" autoFocus className="opacity-0 absolute top-0 left-0 h-full w-full cursor-default" value={pinInput} onChange={e=>setPinInput(e.target.value)} inputMode="numeric" />
+                    <div className="grid grid-cols-3 gap-4">
+                        {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} type="button" onClick={()=>setPinInput(p=> (p+n).slice(0,4))} className="h-16 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-bold text-2xl transition-all border border-white/5 active:scale-95">{n}</button>)}
                         <div/>
-                        <button type="button" onClick={()=>setPinInput(p=> (p+0).slice(0,4))} className="h-14 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xl">0</button>
-                        <button type="button" onClick={()=>setPinInput(p=>p.slice(0,-1))} className="h-14 rounded-xl bg-slate-800 hover:bg-slate-700 text-red-400 flex items-center justify-center"><Icon name="Delete" size={20}/></button>
+                        <button type="button" onClick={()=>setPinInput(p=> (p+0).slice(0,4))} className="h-16 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-bold text-2xl transition-all border border-white/5 active:scale-95">0</button>
+                        <button type="button" onClick={()=>setPinInput(p=>p.slice(0,-1))} className="h-16 rounded-2xl bg-red-500/10 hover:bg-red-500/20 text-red-400 flex items-center justify-center border border-red-500/10 active:scale-95"><Icon name="Delete" size={24}/></button>
                     </div>
-                    {errorPin && <p className="text-red-500 text-xs mt-4 animate-pulse">PIN Incorrecto</p>}
-                    <Button className="w-full mt-6" onClick={handleUnlock}>Ingresar</Button>
                 </form>
             </div>
         </div>
     );
 
     return (
-        <div className="min-h-screen bg-[#0f172a] text-slate-200 font-sans -m-4 sm:-m-8 p-4 sm:p-8 pb-32">
+        <div className="min-h-screen bg-[#020617] text-slate-200 font-sans -m-4 sm:-m-8 pb-32 relative overflow-hidden selection:bg-indigo-500/30">
+            {/* Background Effects */}
+            <div className="fixed top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-900/20 blur-[120px] pointer-events-none"></div>
+            <div className="fixed bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-purple-900/20 blur-[120px] pointer-events-none"></div>
             
-            {/* HEADER */}
-            <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-8">
-                <div className="flex items-center gap-4 w-full md:w-auto">
-                    <div className="bg-indigo-600 p-2 rounded-lg shadow-lg shadow-indigo-500/30"><Icon name="Wallet" className="text-white"/></div>
-                    <div>
-                        <h2 className="text-2xl font-extrabold text-white leading-none">Tesorería</h2>
-                        <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Panel Financiero</span>
-                    </div>
-                    <button onClick={()=>setShowBalance(!showBalance)} className="ml-2 p-2 rounded-full hover:bg-slate-800 text-slate-500 hover:text-white transition-colors">
-                        <Icon name={showBalance?"Eye":"EyeOff"} size={18}/>
-                    </button>
-                </div>
-                
-                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
-                    <div className="bg-[#1e293b] p-1 rounded-xl shadow-sm border border-slate-700 flex items-center">
-                         <div className="text-slate-300 [&>select]:bg-transparent [&>select]:text-white [&>select]:border-none">
-                            <DateFilter currentDate={currentDate} onChange={setCurrentDate} />
-                         </div>
-                    </div>
-                    
-                    <div className="flex bg-[#1e293b] p-1 rounded-xl border border-slate-700">
-                        {['dashboard','list','goals'].map(t => (
-                            <button key={t} onClick={()=>setTabView(t)} 
-                                className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${tabView===t?'bg-indigo-600 text-white shadow-lg shadow-indigo-500/40':'text-slate-400 hover:text-white hover:bg-white/5'}`}>
-                                {t==='dashboard'?'Panel':(t==='list'?'Movimientos':'Metas')}
-                            </button>
-                        ))}
-                    </div>
-
-                    <button onClick={()=>{setForm({...initialForm, date: Utils.getLocalDate()}); setIsModalOpen(true)}} 
-                        className="bg-emerald-500 hover:bg-emerald-400 text-white p-3 rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center">
-                        <Icon name="Plus" size={20}/>
-                    </button>
-                </div>
-            </div>
-
-            {/* DASHBOARD */}
-            {tabView === 'dashboard' && (
-                <div className="space-y-6 animate-enter">
-                    {/* Tarjetas Resumen con Smart Insights */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {[
-                            { title: 'Ingresos', val: monthTotals.incomes, prev: prevMonthTotals.incomes, color: 'emerald', icon: 'ArrowUpRight' },
-                            { title: 'Gastos', val: monthTotals.expenses, prev: prevMonthTotals.expenses, color: 'rose', icon: 'ArrowDownRight' },
-                        ].map((card, i) => {
-                            const growth = getGrowth(card.val, card.prev);
-                            return (
-                                <div key={i} className="bg-[#1e293b] p-6 rounded-3xl shadow-xl border border-slate-700 relative overflow-hidden group">
-                                    <div className={`absolute right-0 top-0 p-32 bg-${card.color}-500/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none`}></div>
-                                    <div className="relative z-10">
-                                        <div className="flex justify-between items-start mb-4">
-                                            <div className={`p-3 bg-${card.color}-500/20 rounded-2xl text-${card.color}-400`}><Icon name={card.icon} size={24}/></div>
-                                            <div className="text-right">
-                                                <span className={`block text-[10px] font-bold uppercase text-${card.color}-400`}>{card.title}</span>
-                                                <div className={`text-xs font-bold flex items-center justify-end gap-1 ${growth >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                    {growth > 0 ? '▲' : '▼'} {Math.abs(growth)}% <span className="text-slate-500 font-normal">vs mes ant.</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <h3 className={`text-3xl font-black text-white tracking-tight ${blurClass}`}>{showBalance ? formatCurrency(card.val) : '$ ••••'}</h3>
-                                    </div>
-                                </div>
-                            );
-                        })}
-
-                        <div className="bg-gradient-to-br from-indigo-600 to-violet-700 p-6 rounded-3xl shadow-xl shadow-indigo-600/20 relative overflow-hidden text-white">
-                            <div className="absolute right-0 bottom-0 p-24 bg-white/10 rounded-full blur-2xl -mr-10 -mb-10 pointer-events-none"></div>
-                            <div className="relative z-10">
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className="p-3 bg-white/20 rounded-2xl backdrop-blur-sm"><Icon name="Wallet" size={24}/></div>
-                                    <span className="bg-white/20 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase">Balance Neto</span>
-                                </div>
-                                <h3 className={`text-4xl font-black tracking-tight mb-1 ${blurClass}`}>{showBalance ? formatCurrency(monthTotals.net) : '$ ••••'}</h3>
-                                <div className={`flex items-center gap-2 mt-4 text-indigo-100 text-xs font-medium bg-black/20 p-2 rounded-lg w-fit ${blurClass}`}>
-                                    <span>Caja: {showBalance ? formatCurrency(globalBalances.cash) : '•••'}</span>
-                                    <span className="w-px h-3 bg-white/30"></span>
-                                    <span>Banco: {showBalance ? formatCurrency(globalBalances.bank) : '•••'}</span>
-                                </div>
+            <div className="relative z-10 p-4 sm:p-8">
+                {/* HEADER */}
+                <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 mb-10">
+                    <div className="flex items-center gap-5">
+                        <div className="relative">
+                            <div className="absolute inset-0 bg-indigo-500 blur-lg opacity-40 animate-pulse"></div>
+                            <div className="relative bg-gradient-to-br from-indigo-500 to-purple-600 p-3 rounded-2xl text-white shadow-xl">
+                                <Icon name="Wallet" size={28}/>
                             </div>
                         </div>
-                    </div>
-
-                    {/* Gráficos con Blur */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 bg-[#1e293b] rounded-3xl p-6 border border-slate-700 shadow-xl">
-                            <h3 className="font-bold text-xs uppercase text-slate-400 mb-6 flex items-center gap-2"><Icon name="Activity" size={14}/> Tendencia Semestral</h3>
-                            <div className={`h-64 w-full relative ${blurClass}`}><canvas ref={lineChartRef}></canvas></div>
+                        <div>
+                            <h2 className="text-3xl font-black text-white tracking-tight">Finanzas</h2>
+                            <p className="text-slate-400 font-medium">Panel de Control</p>
                         </div>
-                        <div className="bg-[#1e293b] rounded-3xl p-6 border border-slate-700 shadow-xl flex flex-col">
-                            <h3 className="font-bold text-xs uppercase text-slate-400 mb-6 flex items-center gap-2"><Icon name="PieChart" size={14}/> Distribución</h3>
-                            <div className={`h-48 w-full relative flex-1 flex justify-center items-center ${blurClass}`}>
-                                {chartData.pie.length > 0 ? <canvas ref={pieChartRef}></canvas> : <p className="text-xs text-slate-500">Sin datos de gastos</p>}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* LISTA MOVIMIENTOS */}
-            {tabView === 'list' && (
-                <div className="space-y-4 animate-enter relative">
-                    {/* Filtros Avanzados y Exportación */}
-                    <div className="flex flex-col md:flex-row gap-4 bg-[#1e293b] p-3 rounded-2xl shadow-sm border border-slate-700 sticky top-0 z-30 backdrop-blur-md bg-opacity-90">
-                        <div className="flex items-center gap-2 bg-slate-800/50 rounded-xl px-3 py-2 flex-1">
-                            <Icon name="Search" size={18} className="text-slate-400"/>
-                            <input className="w-full bg-transparent border-none text-sm outline-none text-white placeholder-slate-500 font-medium" placeholder="Buscar..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
-                        </div>
-                        
-                        <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 scrollbar-hide">
-                            {[
-                                { id: 'all', label: 'Todos' },
-                                { id: 'income', label: 'Ingresos' },
-                                { id: 'expense', label: 'Gastos' }
-                            ].map(f => (
-                                <button key={f.id} onClick={()=>setFilterType(f.id)} 
-                                    className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${filterType===f.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
-                                    {f.label}
-                                </button>
-                            ))}
-                        </div>
-
-                        <button onClick={handleExportCSV} className="px-4 py-2 rounded-xl bg-slate-800 text-emerald-400 hover:bg-slate-700 font-bold text-xs flex items-center gap-2 transition-colors border border-slate-700">
-                            <Icon name="Download" size={16}/> CSV
+                        <button onClick={()=>setShowBalance(!showBalance)} className="ml-2 p-2 rounded-full hover:bg-white/5 text-slate-500 hover:text-white transition-colors">
+                            <Icon name={showBalance?"Eye":"EyeOff"} size={20}/>
                         </button>
                     </div>
-
-                    {monthlyData.length === 0 ? (
-                        <div className="p-12 text-center border-2 border-dashed border-slate-700 rounded-3xl opacity-50">
-                            <div className="bg-slate-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-600"><Icon name="Inbox" size={32}/></div>
-                            <p className="text-slate-400 font-medium">No se encontraron movimientos.</p>
+                    
+                    <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto bg-white/5 p-1.5 rounded-2xl border border-white/10 backdrop-blur-md">
+                        <div className="text-slate-300 [&>select]:bg-transparent [&>select]:text-white [&>select]:border-none [&>select]:font-bold [&>select]:outline-none px-2">
+                            <DateFilter currentDate={currentDate} onChange={setCurrentDate} />
                         </div>
-                    ) : (
-                        <div className="space-y-3 pb-24">
-                            {monthlyData.map(f => {
-                                const amount = safeNum(f.total||f.amount);
-                                const isExpanded = expandedId === f.id;
-                                const isIncome = amount > 0;
-                                const isSelected = selectedIds.includes(f.id);
+                        <div className="w-px h-6 bg-white/10 mx-1"></div>
+                        {['dashboard','list','goals'].map(t => (
+                            <button key={t} onClick={()=>setTabView(t)} 
+                                className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all relative overflow-hidden ${tabView===t?'text-white shadow-lg':'text-slate-400 hover:text-white hover:bg-white/5'}`}>
+                                {tabView===t && <div className="absolute inset-0 bg-gradient-to-r from-indigo-600 to-purple-600 opacity-100"></div>}
+                                <span className="relative z-10 capitalize">{t === 'dashboard' ? 'Resumen' : t === 'list' ? 'Movimientos' : 'Metas'}</span>
+                            </button>
+                        ))}
+                        <div className="w-px h-6 bg-white/10 mx-1"></div>
+                        <button onClick={()=>{setForm({...initialForm, date: Utils.getLocalDate()}); setIsModalOpen(true)}} 
+                            className="bg-white text-indigo-950 p-2.5 rounded-xl hover:bg-indigo-50 transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)] active:scale-95">
+                            <Icon name="Plus" size={20}/>
+                        </button>
+                    </div>
+                </div>
 
-                                return (
-                                    <div key={f.id} 
-                                        className={`group relative bg-[#1e293b] border transition-all duration-300 rounded-2xl overflow-hidden
-                                        ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500 bg-indigo-900/10' : 'border-slate-700 hover:border-slate-500'}
-                                        ${isExpanded ? 'shadow-2xl shadow-black/50 z-10 scale-[1.01]' : 'shadow-sm'}`}
-                                    >
-                                        <div className="p-4 flex flex-col md:flex-row gap-4 items-center cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : f.id)}>
-                                            <div className="flex w-full md:w-auto items-center justify-between gap-4">
-                                                <input type="checkbox" checked={isSelected} onChange={(e)=>{e.stopPropagation(); toggleSelect(f.id)}} className="w-5 h-5 rounded border-slate-600 bg-slate-800 checked:bg-indigo-500 cursor-pointer"/>
-                                                
-                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-inner flex-shrink-0
-                                                    ${isIncome ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
-                                                    <Icon name={f.type === 'Culto' ? 'Church' : (categories.find(c=>c.value===f.category)?.icon || 'Tag')} size={18}/>
+                {/* DASHBOARD CONTENT */}
+                {tabView === 'dashboard' && (
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-enter">
+                        {/* Main Balance Card - Bento Style */}
+                        <div className="lg:col-span-2 bg-gradient-to-br from-indigo-600 to-purple-800 rounded-[32px] p-8 text-white relative overflow-hidden shadow-2xl shadow-indigo-900/40 border border-white/10">
+                            <div className="absolute top-0 right-0 p-32 bg-white/10 rounded-full blur-3xl -mr-16 -mt-16 mix-blend-overlay"></div>
+                            <div className="relative z-10 flex flex-col justify-between h-full min-h-[220px]">
+                                <div className="flex justify-between items-start">
+                                    <div className="bg-black/20 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/10 text-xs font-bold uppercase tracking-wider text-indigo-100">Balance Total</div>
+                                    <Icon name="Activity" className="opacity-50"/>
+                                </div>
+                                <div>
+                                    <h3 className={`text-5xl md:text-6xl font-black tracking-tight mb-2 ${blurClass}`}>
+                                        {showBalance ? formatCurrency(monthTotals.net) : '$ •••••••'}
+                                    </h3>
+                                    <div className={`flex items-center gap-4 text-indigo-100 font-medium ${blurClass}`}>
+                                        <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]"></div> Neto Mes</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Mini Cards Stack */}
+                        <div className="grid grid-rows-2 gap-6">
+                            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-[32px] p-6 flex flex-col justify-center relative overflow-hidden group">
+                                <div className="absolute right-[-20px] top-[-20px] bg-emerald-500/20 w-32 h-32 rounded-full blur-2xl group-hover:bg-emerald-500/30 transition-all"></div>
+                                <div className="relative z-10">
+                                    <div className="flex items-center gap-3 mb-2 text-emerald-400">
+                                        <div className="p-2 bg-emerald-500/20 rounded-lg"><Icon name="ArrowUp" size={18}/></div>
+                                        <span className="font-bold text-sm uppercase">Ingresos</span>
+                                    </div>
+                                    <span className={`text-3xl font-black text-white ${blurClass}`}>{showBalance ? formatCurrency(monthTotals.incomes) : '••••'}</span>
+                                </div>
+                            </div>
+                            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-[32px] p-6 flex flex-col justify-center relative overflow-hidden group">
+                                <div className="absolute right-[-20px] bottom-[-20px] bg-rose-500/20 w-32 h-32 rounded-full blur-2xl group-hover:bg-rose-500/30 transition-all"></div>
+                                <div className="relative z-10">
+                                    <div className="flex items-center gap-3 mb-2 text-rose-400">
+                                        <div className="p-2 bg-rose-500/20 rounded-lg"><Icon name="ArrowDown" size={18}/></div>
+                                        <span className="font-bold text-sm uppercase">Gastos</span>
+                                    </div>
+                                    <span className={`text-3xl font-black text-white ${blurClass}`}>{showBalance ? formatCurrency(monthTotals.expenses) : '••••'}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Chart Area */}
+                        <div className="lg:col-span-3 bg-[#0f172a]/50 backdrop-blur-md border border-white/5 rounded-[32px] p-8">
+                            <div className="flex items-center justify-between mb-6">
+                                <h3 className="text-white font-bold flex items-center gap-2"><Icon name="BarChart2" className="text-indigo-400"/> Flujo de Caja</h3>
+                            </div>
+                            <div className={`h-64 w-full ${blurClass}`}>
+                                <canvas ref={lineChartRef}></canvas>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* LIST VIEW */}
+                {tabView === 'list' && (
+                    <div className="animate-enter space-y-6">
+                        {/* Filters & Actions Bar */}
+                        <div className="sticky top-0 z-40 bg-[#020617]/80 backdrop-blur-xl p-4 rounded-3xl border border-white/10 shadow-2xl mb-8">
+                            <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                                <div className="flex items-center gap-3 w-full md:w-auto flex-1">
+                                    <div className="relative w-full md:max-w-md">
+                                        <Icon name="Search" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18}/>
+                                        <input className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all" 
+                                            placeholder="Buscar movimiento..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
+                                    </div>
+                                </div>
+                                <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 hide-scrollbar">
+                                    {[
+                                        {id: 'all', label: 'Todo'},
+                                        {id: 'income', label: 'Ingresos'},
+                                        {id: 'expense', label: 'Gastos'}
+                                    ].map(f => (
+                                        <button key={f.id} onClick={()=>setFilterType(f.id)} className={`px-5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap border transition-all ${filterType===f.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-transparent border-white/10 text-slate-400 hover:bg-white/5'}`}>
+                                            {f.label}
+                                        </button>
+                                    ))}
+                                    <div className="w-px h-8 bg-white/10 mx-2"></div>
+                                    <button onClick={handleExportCSV} className="px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-all flex items-center gap-2">
+                                        <Icon name="Download" size={16}/> CSV
+                                    </button>
+                                    <button onClick={selectAll} className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-300 hover:text-white text-xs font-bold transition-all flex items-center gap-2">
+                                        <Icon name="CheckSquare" size={16}/> {selectedIds.length === monthlyData.length && monthlyData.length > 0 ? 'Desmarcar' : 'Todos'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Transactions Grid */}
+                        {monthlyData.length === 0 ? (
+                             <div className="text-center py-20 opacity-50">
+                                 <Icon name="Wind" size={48} className="mx-auto mb-4 text-slate-600"/>
+                                 <p>No hay nada por aquí...</p>
+                             </div>
+                        ) : (
+                            <div className="grid grid-cols-1 gap-3">
+                                {monthlyData.map(f => {
+                                    const isSelected = selectedIds.includes(f.id);
+                                    const isIncome = safeNum(f.total||f.amount) > 0;
+                                    const amount = safeNum(f.total||f.amount);
+                                    const isExpanded = expandedId === f.id;
+
+                                    return (
+                                        <div key={f.id} onClick={() => setExpandedId(isExpanded ? null : f.id)}
+                                            className={`group relative bg-white/5 border ${isSelected ? 'border-indigo-500 bg-indigo-500/10' : 'border-white/5 hover:border-white/20'} rounded-2xl transition-all duration-300 overflow-hidden cursor-pointer`}>
+                                            
+                                            <div className="p-4 flex items-center gap-4">
+                                                <div onClick={(e)=>e.stopPropagation()}>
+                                                    <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(f.id)} 
+                                                        className="w-5 h-5 rounded border-slate-600 bg-slate-800/50 checked:bg-indigo-500 cursor-pointer appearance-none checked:border-transparent relative after:content-['✓'] after:absolute after:text-white after:text-xs after:left-1 after:top-0"/>
                                                 </div>
 
-                                                <div className="md:hidden text-right flex-1">
-                                                    <div className={`font-mono text-lg font-bold ${isIncome ? 'text-emerald-400' : 'text-rose-400'} ${blurClass}`}>
-                                                        {showBalance ? formatCurrency(amount) : '$ •••'}
+                                                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-inner flex-shrink-0 ${isIncome ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                                    <Icon name={f.type==='Culto'?'Church':(categories.find(c=>c.value===f.category)?.icon || 'Hash')} />
+                                                </div>
+
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex justify-between items-start">
+                                                        <h4 className="text-white font-bold truncate pr-4">{f.type==='Culto'?'Culto General':f.category}</h4>
+                                                        <span className={`font-mono font-bold ${isIncome?'text-emerald-400':'text-rose-400'} ${blurClass}`}>
+                                                            {showBalance ? formatCurrency(amount) : '••••'}
+                                                        </span>
                                                     </div>
-                                                    <div className="text-xs text-slate-500">{formatDate(f.date)}</div>
+                                                    <div className="flex justify-between items-end mt-1">
+                                                        <p className="text-slate-500 text-xs truncate max-w-[200px]">{f.notes || f.method}</p>
+                                                        <span className="text-slate-600 text-[10px] font-medium uppercase tracking-wide">{formatDate(f.date)}</span>
+                                                    </div>
                                                 </div>
                                             </div>
 
-                                            <div className="flex-1 hidden md:block">
-                                                <div className="flex justify-between items-center">
-                                                    <div>
-                                                        <div className="font-bold text-slate-200">{f.type==='Culto'?'Culto General':f.category}</div>
-                                                        <div className="text-xs text-slate-500 max-w-md truncate">{f.notes || f.method}</div>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <div className={`font-mono text-lg font-bold ${isIncome ? 'text-emerald-400' : 'text-rose-400'} ${blurClass}`}>
-                                                            {showBalance ? formatCurrency(amount) : '$ ••••••'}
-                                                        </div>
-                                                        <div className="text-xs text-slate-500">{formatDate(f.date)}</div>
-                                                    </div>
+                                            {/* Expanded Details */}
+                                            <div className={`bg-black/20 border-t border-white/5 transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-48 opacity-100 p-4' : 'max-h-0 opacity-0 overflow-hidden'}`}>
+                                                <div className="flex justify-between items-center text-sm mb-2">
+                                                    <span className="text-slate-400">Detalle Completo:</span>
+                                                    <span className="text-white">{f.notes || "Sin notas"}</span>
+                                                </div>
+                                                <div className="flex justify-end gap-3 mt-3">
+                                                    {f.attachmentUrl && <a href={f.attachmentUrl} target="_blank" className="text-indigo-400 text-xs font-bold hover:underline flex items-center gap-1"><Icon name="Image" size={14}/> Ver Recibo</a>}
+                                                    <button onClick={(e)=>{e.stopPropagation(); handleExportPDF(f)}} className="text-white bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2"><Icon name="Printer" size={14}/> Imprimir PDF</button>
                                                 </div>
                                             </div>
                                         </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                )}
 
-                                        {/* ACCORDEON DETAILS */}
-                                        <div className={`overflow-hidden transition-all duration-300 ease-in-out bg-[#0f172a]/50 border-t border-slate-700/50 ${isExpanded ? 'max-h-96 opacity-100 p-4' : 'max-h-0 opacity-0'}`}>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                                                <div className="space-y-2">
-                                                    <p className="text-slate-400 text-xs uppercase font-bold">Detalles</p>
-                                                    <div className="flex justify-between border-b border-slate-700 pb-1">
-                                                        <span className="text-slate-300">ID Operación</span>
-                                                        <span className="text-slate-500 font-mono">#{f.id.slice(0,8)}</span>
-                                                    </div>
-                                                    <div className="flex justify-between border-b border-slate-700 pb-1">
-                                                        <span className="text-slate-300">Método de Pago</span>
-                                                        <span className="text-white font-medium">{f.method}</span>
-                                                    </div>
-                                                    {f.type === 'Culto' && (
-                                                        <>
-                                                        <div className="flex justify-between border-b border-slate-700 pb-1">
-                                                            <span className="text-slate-300">Diezmos (Total)</span>
-                                                            <span className={`text-emerald-400 font-mono ${blurClass}`}>{showBalance ? formatCurrency(safeNum(f.tithesCash)+safeNum(f.tithesTransfer)) : '•••'}</span>
-                                                        </div>
-                                                        <div className="flex justify-between border-b border-slate-700 pb-1">
-                                                            <span className="text-slate-300">Ofrendas (Total)</span>
-                                                            <span className={`text-emerald-400 font-mono ${blurClass}`}>{showBalance ? formatCurrency(safeNum(f.offeringsCash)+safeNum(f.offeringsTransfer)) : '•••'}</span>
-                                                        </div>
-                                                        </>
-                                                    )}
+                {/* GOALS VIEW (NEW 2.0) */}
+                {tabView === 'goals' && (
+                    <div className="animate-enter space-y-6">
+                        <div className="flex justify-end">
+                            <button onClick={()=>openGoalModal()} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-indigo-600/20 transition-all flex items-center gap-2">
+                                <Icon name="Target" size={18}/> Crear Meta
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {goals.map(g => {
+                                const { current, target, pct } = getGoalProgress(g);
+                                const isSaving = g.type === 'saving'; // Green/Blue theme
+                                const colorClass = isSaving ? 'emerald' : 'orange'; // Tailwind dynamic class limitation: prefer static
+                                const colorHex = isSaving ? '#10b981' : '#f97316';
+                                const catIcon = categories.find(c=>c.value===g.category)?.icon || 'Star';
+
+                                return (
+                                    <div key={g.id} onClick={()=>openGoalModal(g)} className="cursor-pointer group relative bg-white/5 hover:bg-white/10 border border-white/5 hover:border-indigo-500/30 rounded-3xl p-6 transition-all duration-300">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`p-3 rounded-2xl ${isSaving ? 'bg-emerald-500/20 text-emerald-400' : 'bg-orange-500/20 text-orange-400'}`}>
+                                                    <Icon name={catIcon} size={24}/>
                                                 </div>
-                                                <div className="space-y-3 flex flex-col justify-between">
-                                                    <div>
-                                                        <p className="text-slate-400 text-xs uppercase font-bold mb-1">Nota Adjunta</p>
-                                                        <p className="text-slate-300 italic text-xs bg-slate-800 p-2 rounded-lg">{f.notes || "Sin notas adicionales."}</p>
-                                                    </div>
-                                                    
-                                                    <div className="flex justify-end gap-3 pt-2">
-                                                        {f.attachmentUrl && (
-                                                            <a href={f.attachmentUrl} target="_blank" className="flex items-center gap-2 text-xs font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-900/30 px-3 py-2 rounded-lg transition-colors">
-                                                                <Icon name="Image" size={14}/> Ver Adjunto
-                                                            </a>
-                                                        )}
-                                                        <button onClick={(e)=>{e.stopPropagation(); handleExportPDF(f)}} className="flex items-center gap-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg transition-colors shadow-lg shadow-indigo-600/30">
-                                                            <Icon name="Printer" size={14}/> Comprobante
-                                                        </button>
-                                                    </div>
+                                                <div>
+                                                    <h4 className="text-white font-bold text-lg">{g.label || g.category}</h4>
+                                                    <p className="text-slate-500 text-xs uppercase font-bold">{isSaving ? 'Meta de Ahorro' : 'Límite de Gasto'}</p>
                                                 </div>
+                                            </div>
+                                            <div className={`px-3 py-1 rounded-full text-xs font-black ${isSaving ? 'bg-emerald-500/10 text-emerald-400' : 'bg-orange-500/10 text-orange-400'}`}>
+                                                {pct}%
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="relative h-4 bg-white/5 rounded-full overflow-hidden mb-4 shadow-inner">
+                                            <div className={`absolute top-0 left-0 h-full rounded-full transition-all duration-1000 ${isSaving ? 'bg-emerald-500' : 'bg-orange-500'} shadow-[0_0_15px_rgba(0,0,0,0.5)]`}
+                                                style={{ width: `${Math.min(pct, 100)}%`, boxShadow: `0 0 20px ${colorHex}` }}></div>
+                                        </div>
+
+                                        <div className="flex justify-between items-end">
+                                            <div>
+                                                <p className="text-slate-500 text-xs mb-1">{isSaving ? 'Recaudado' : 'Gastado'}</p>
+                                                <p className={`text-xl font-black ${blurClass} text-white`}>{formatCurrency(current)}</p>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-slate-500 text-xs mb-1">Meta</p>
+                                                <p className={`text-lg font-bold text-slate-300 ${blurClass}`}>{formatCurrency(target)}</p>
                                             </div>
                                         </div>
                                     </div>
                                 );
                             })}
                         </div>
-                    )}
-                    
-                    {/* Bulk Actions */}
-                    {selectedIds.length > 0 && (
-                        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white text-slate-900 px-6 py-4 rounded-full shadow-2xl flex items-center gap-6 animate-enter z-50 min-w-[300px] justify-between border-4 border-slate-900/10">
-                            <div className="flex flex-col">
-                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Selección</span>
-                                <span className="text-lg font-black text-slate-900 leading-none">{selectedIds.length} items</span>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick={()=>setSelectedIds([])} className="p-2 rounded-full hover:bg-slate-100 text-slate-500 transition-colors"><Icon name="X" size={20}/></button>
-                                <button onClick={handleBulkDelete} className="bg-red-500 hover:bg-red-600 text-white px-5 py-2 rounded-full font-bold flex items-center gap-2 transition-all shadow-lg shadow-red-500/30">
-                                    <Icon name="Trash" size={16}/> Eliminar
-                                </button>
-                            </div>
+                    </div>
+                )}
+            </div>
+
+            {/* FIXED BULK DELETE BAR (OUTSIDE EVERYTHING) */}
+            {selectedIds.length > 0 && (
+                <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-[9999] animate-enter">
+                    <div className="bg-white/10 backdrop-blur-xl border border-white/20 text-white pl-6 pr-2 py-2 rounded-full shadow-[0_20px_40px_rgba(0,0,0,0.5)] flex items-center gap-6">
+                        <div className="flex flex-col">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Selección</span>
+                            <span className="text-base font-black leading-none">{selectedIds.length} items</span>
                         </div>
-                    )}
-                </div>
-            )}
-
-            {/* METAS (PRESUPUESTO) */}
-            {tabView === 'goals' && (
-                <div className="space-y-6 animate-enter">
-                    <div className="flex justify-end">
-                        <button onClick={()=>setIsGoalModalOpen(true)} className="text-indigo-400 hover:text-white text-sm font-bold flex items-center gap-2 border border-indigo-500/30 px-4 py-2 rounded-xl hover:bg-indigo-500/10 transition-colors">
-                            <Icon name="Target" size={16}/> Definir Nueva Meta
-                        </button>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {categories.filter(c=>c.value!=='Ingreso').map(cat => {
-                            const spent = Math.abs(safeNum(chartData.pie.find(p=>p.name===cat.value)?.value || 0));
-                            const goal = goals[cat.value] || 0;
-                            const pct = goal > 0 ? Math.min(100, Math.round((spent/goal)*100)) : 0;
-                            const isCritical = pct > 85;
-                            const statusColor = pct > 90 ? 'bg-rose-500' : (pct > 70 ? 'bg-amber-500' : 'bg-emerald-500');
-                            const textColor = pct > 90 ? 'text-rose-400' : (pct > 70 ? 'text-amber-400' : 'text-emerald-400');
-                            
-                            return (
-                                <div key={cat.value} className={`bg-[#1e293b] border ${isCritical ? 'border-rose-500/50 animate-pulse' : 'border-slate-700'} p-5 rounded-2xl relative overflow-hidden transition-all`}>
-                                    <div className="flex justify-between items-center mb-3">
-                                        <div className="flex items-center gap-3">
-                                            <div className="p-2 bg-slate-800 rounded-lg" style={{color: cat.color}}><Icon name={cat.icon} size={20}/></div>
-                                            <h4 className="font-bold text-slate-200">{cat.label}</h4>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            {isCritical && <Icon name="AlertTriangle" size={16} className="text-rose-500"/>}
-                                            <span className={`text-sm font-black ${textColor}`}>{pct}%</span>
-                                        </div>
-                                    </div>
-                                    <div className="w-full bg-slate-800 rounded-full h-2 mb-3 overflow-hidden">
-                                        <div className={`h-full ${statusColor} shadow-[0_0_10px_rgba(0,0,0,0.5)] transition-all duration-1000 ease-out`} style={{width: `${pct}%`, boxShadow: `0 0 10px ${statusColor}`}}></div>
-                                    </div>
-                                    <div className="flex justify-between text-xs font-mono">
-                                        <span className="text-slate-400">Gastado: <span className={`font-bold ${blurClass}`}>{showBalance ? formatCurrency(spent) : '•••'}</span></span>
-                                        <span className="text-slate-500">Meta: {showBalance ? formatCurrency(goal) : '•••'}</span>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                        <div className="flex items-center gap-2">
+                            <button onClick={()=>setSelectedIds([])} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors text-slate-300"><Icon name="X"/></button>
+                            <button onClick={handleBulkDelete} className="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-full font-bold shadow-lg shadow-red-500/30 transition-all flex items-center gap-2">
+                                <Icon name="Trash2" size={18}/> Eliminar
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
 
-            {/* MODALES ESTILIZADOS */}
-            <Modal isOpen={isModalOpen} onClose={()=>setIsModalOpen(false)} title="Registrar Movimiento">
-                <div className="space-y-4 pt-2">
-                    <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
-                        {['Culto','Gasto','Ingreso'].map(t=><button key={t} onClick={()=>setForm({...initialForm, type:t})} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${form.type===t?'bg-white shadow text-indigo-600':'text-slate-400 hover:text-slate-600'}`}>{t}</button>)}
+            {/* MODAL REGISTRO */}
+            <Modal isOpen={isModalOpen} onClose={()=>setIsModalOpen(false)} title="Nuevo Movimiento">
+                <div className="space-y-5">
+                    <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1.5 rounded-2xl">
+                        {['Culto','Gasto','Ingreso'].map(t=><button key={t} onClick={()=>setForm({...initialForm, type:t})} className={`py-2 text-xs font-black uppercase tracking-wide rounded-xl transition-all ${form.type===t?'bg-white text-indigo-900 shadow-sm':'text-slate-400 hover:text-slate-600'}`}>{t}</button>)}
                     </div>
                     <Input type="date" value={form.date} onChange={e=>setForm({...form, date:e.target.value})}/>
                     
                     {form.type==='Culto' ? (
-                        <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-100">
-                            <p className="text-xs font-bold text-slate-400 uppercase mb-2">Efectivo</p>
-                            <div className="grid grid-cols-2 gap-3 mb-4">
-                                <Input label="Diezmos" type="number" value={form.tithesCash} onChange={e=>setForm({...form, tithesCash:e.target.value})}/>
-                                <Input label="Ofrendas" type="number" value={form.offeringsCash} onChange={e=>setForm({...form, offeringsCash:e.target.value})}/>
+                        <div className="space-y-4">
+                            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+                                <span className="text-xs font-bold text-slate-400 uppercase block mb-3">Efectivo</span>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <Input label="Diezmos" type="number" value={form.tithesCash} onChange={e=>setForm({...form, tithesCash:e.target.value})}/>
+                                    <Input label="Ofrendas" type="number" value={form.offeringsCash} onChange={e=>setForm({...form, offeringsCash:e.target.value})}/>
+                                </div>
                             </div>
-                            <p className="text-xs font-bold text-slate-400 uppercase mb-2">Digital / Banco</p>
-                            <div className="grid grid-cols-2 gap-3">
-                                <Input label="Diezmos" type="number" value={form.tithesTransfer} onChange={e=>setForm({...form, tithesTransfer:e.target.value})}/>
-                                <Input label="Ofrendas" type="number" value={form.offeringsTransfer} onChange={e=>setForm({...form, offeringsTransfer:e.target.value})}/>
+                            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+                                <span className="text-xs font-bold text-slate-400 uppercase block mb-3">Digital</span>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <Input label="Diezmos" type="number" value={form.tithesTransfer} onChange={e=>setForm({...form, tithesTransfer:e.target.value})}/>
+                                    <Input label="Ofrendas" type="number" value={form.offeringsTransfer} onChange={e=>setForm({...form, offeringsTransfer:e.target.value})}/>
+                                </div>
                             </div>
                         </div>
                     ) : (
-                        <div className="space-y-4">
+                        <>
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="col-span-1"><Input label="Monto Total" type="number" value={form.amount} onChange={e=>setForm({...form, amount:e.target.value})} className="font-mono text-lg font-bold" /></div>
-                                <div className="col-span-1"><Select label="Método" value={form.method} onChange={e=>setForm({...form, method:e.target.value})}><option>Efectivo</option><option>Banco</option></Select></div>
+                                <Input label="Monto" type="number" value={form.amount} onChange={e=>setForm({...form, amount:e.target.value})} className="font-mono text-xl font-bold"/>
+                                <Select label="Método" value={form.method} onChange={e=>setForm({...form, method:e.target.value})}><option>Efectivo</option><option>Banco</option></Select>
                             </div>
                             <SmartSelect label="Categoría" options={categories} value={form.category} onChange={v=>setForm({...form, category:v})}/>
-                        </div>
+                        </>
                     )}
-                    <Input label="Notas / Detalles Adicionales" value={form.notes} onChange={e=>setForm({...form, notes:e.target.value})}/>
-                    
+                    <Input label="Notas" value={form.notes} onChange={e=>setForm({...form, notes:e.target.value})}/>
                     <div className="flex gap-3 mt-4">
                         <label className={`flex-1 p-3 border-2 border-dashed rounded-xl flex justify-center items-center gap-2 cursor-pointer transition-colors ${form.attachmentUrl ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 hover:border-indigo-400 hover:bg-indigo-50 text-slate-400'}`}>
                             <Icon name={form.attachmentUrl?"Check":"Camera"} size={18}/> 
@@ -629,26 +608,36 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                             <input type="file" className="hidden" onChange={handleImage}/>
                         </label>
                     </div>
-                    <Button className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl shadow-lg shadow-indigo-500/30 font-bold text-lg mt-2" onClick={handleSave} disabled={isUploading}>
-                        {isUploading ? 'Procesando...' : 'Guardar Operación'}
-                    </Button>
+                    <Button className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-indigo-600/20" onClick={handleSave} disabled={isUploading}>Guardar</Button>
                 </div>
             </Modal>
 
-            <Modal isOpen={isGoalModalOpen} onClose={()=>setIsGoalModalOpen(false)} title="Presupuesto Mensual">
-                <div className="space-y-6 pt-2">
-                    <SmartSelect label="Seleccionar Categoría" options={categories} value={goalForm.category} onChange={v=>setGoalForm({...goalForm, category:v})}/>
-                    <div className="bg-slate-50 p-4 rounded-xl text-center">
-                        <p className="text-xs text-slate-500 mb-1">Límite de Gasto Mensual</p>
-                        <Input type="number" value={goalForm.amount} onChange={e=>setGoalForm({...goalForm, amount:e.target.value})} className="text-center text-3xl font-black bg-transparent border-none outline-none text-slate-800 placeholder-slate-300"/>
+            {/* MODAL METAS */}
+            <Modal isOpen={isGoalModalOpen} onClose={()=>setIsGoalModalOpen(false)} title={goalForm.id ? "Editar Meta" : "Nueva Meta"}>
+                <div className="space-y-5">
+                    <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-2xl">
+                        <button onClick={()=>setGoalForm({...goalForm, type:'spending'})} className={`py-2 text-xs font-black uppercase rounded-xl transition-all ${goalForm.type==='spending'?'bg-white text-orange-500 shadow-sm':'text-slate-400'}`}>Límite Gasto</button>
+                        <button onClick={()=>setGoalForm({...goalForm, type:'saving'})} className={`py-2 text-xs font-black uppercase rounded-xl transition-all ${goalForm.type==='saving'?'bg-white text-emerald-500 shadow-sm':'text-slate-400'}`}>Ahorro / Ingreso</button>
                     </div>
-                    <Button className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold" onClick={handleSaveGoal}>Establecer Meta</Button>
+
+                    <Input label="Nombre de la Meta (Opcional)" placeholder="Ej: Sueldo Pastoral, Alquiler..." value={goalForm.label} onChange={e=>setGoalForm({...goalForm, label:e.target.value})}/>
+                    <SmartSelect label="Categoría a Monitorear" options={categories} value={goalForm.category} onChange={v=>setGoalForm({...goalForm, category:v})}/>
+                    
+                    <div className="bg-slate-50 p-4 rounded-2xl text-center border border-slate-200">
+                        <p className="text-xs text-slate-500 mb-2 uppercase font-bold">{goalForm.type==='spending' ? 'Límite Máximo' : 'Objetivo a Juntar'}</p>
+                        <Input type="number" value={goalForm.amount} onChange={e=>setGoalForm({...goalForm, amount:e.target.value})} className="text-center text-4xl font-black bg-transparent border-none outline-none text-slate-800 placeholder-slate-300"/>
+                    </div>
+
+                    <div className="flex gap-3">
+                        {goalForm.id && <button onClick={()=>handleDeleteGoal(goalForm.id)} className="p-4 rounded-2xl bg-red-50 text-red-500 hover:bg-red-100"><Icon name="Trash" size={20}/></button>}
+                        <Button className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold" onClick={handleSaveGoal}>Guardar Meta</Button>
+                    </div>
                 </div>
             </Modal>
 
-            {/* ELEMENTO OCULTO PARA PDF (Diseño Clean Moderno) */}
+            {/* ELEMENTO OCULTO PARA PDF (Recuperado) */}
             {pdfData && (
-                <div ref={printRef} style={{ display: 'none', width: '100mm', height: '150mm', background: 'white', color: '#1e293b', padding: '0', fontFamily: 'sans-serif', position: 'relative' }}>
+                <div ref={printRef} style={{ display: 'none', width: '100mm', minHeight: '150mm', background: 'white', color: '#1e293b', padding: '0', fontFamily: 'sans-serif', position: 'relative' }}>
                     <div style={{ background: '#4f46e5', height: '8px', width: '100%' }}></div>
                     <div style={{ padding: '30px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' }}>
