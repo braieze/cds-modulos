@@ -3,16 +3,18 @@ window.Views = window.Views || {};
 window.Views.Finances = ({ finances, addData, userProfile }) => {
     const { useState, useMemo, useEffect, useRef } = React;
     const Utils = window.Utils || {};
-    // Extraemos componentes. Si Card no soporta estilos oscuros, usaremos divs directos.
     const { Button, Modal, Input, Select, DateFilter, formatCurrency, formatDate, Icon, SmartSelect, compressImage, Badge } = Utils;
 
     // --- ESTADOS ---
     const [currentDate, setCurrentDate] = useState(new Date());
-    const [tabView, setTabView] = useState('dashboard'); // 'dashboard', 'list', 'goals'
+    const [tabView, setTabView] = useState('dashboard');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
+    
+    // Privacy & UX
     const [showBalance, setShowBalance] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [filterType, setFilterType] = useState('all'); // 'all', 'income', 'expense'
     
     // Accordion State
     const [expandedId, setExpandedId] = useState(null);
@@ -34,7 +36,7 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
     const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
     const [goalForm, setGoalForm] = useState({ category: '', amount: '' });
 
-    // Referencias PDF
+    // Referencias PDF/CSV
     const printRef = useRef(null);
     const [pdfData, setPdfData] = useState(null);
 
@@ -56,19 +58,28 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
     // --- CÁLCULOS ---
     const safeNum = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 
+    // 1. Filtrado de Datos
     const monthlyData = useMemo(() => {
         if (!finances) return [];
         const m = currentDate.toISOString().slice(0, 7);
         return finances
             .filter(f => f.date && f.date.startsWith(m))
             .filter(f => {
-                if (!searchTerm) return true;
-                const term = searchTerm.toLowerCase();
-                return (f.category||'').toLowerCase().includes(term) || (f.notes||'').toLowerCase().includes(term);
+                // Filtro Texto
+                if (searchTerm) {
+                    const term = searchTerm.toLowerCase();
+                    const matches = (f.category||'').toLowerCase().includes(term) || (f.notes||'').toLowerCase().includes(term);
+                    if (!matches) return false;
+                }
+                // Filtro Tipo (Chip)
+                if (filterType === 'income') return safeNum(f.total || f.amount) > 0;
+                if (filterType === 'expense') return safeNum(f.total || f.amount) < 0;
+                return true;
             })
             .sort((a,b) => new Date(b.date) - new Date(a.date));
-    }, [finances, currentDate, searchTerm]);
+    }, [finances, currentDate, searchTerm, filterType]);
 
+    // 2. Totales Mes Actual
     const monthTotals = useMemo(() => {
         let incomes = 0, expenses = 0;
         monthlyData.forEach(f => {
@@ -79,6 +90,27 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         return { incomes, expenses, net: incomes - expenses };
     }, [monthlyData]);
 
+    // 3. Comparativa Mes Anterior (Smart Insights)
+    const prevMonthTotals = useMemo(() => {
+        if (!finances) return { incomes: 0, expenses: 0 };
+        const d = new Date(currentDate);
+        d.setMonth(d.getMonth() - 1);
+        const prevM = d.toISOString().slice(0, 7);
+        
+        let incomes = 0, expenses = 0;
+        finances.filter(f => f.date && f.date.startsWith(prevM)).forEach(f => {
+            const val = safeNum(f.total || f.amount);
+            if (val > 0) incomes += val; else expenses += Math.abs(val);
+        });
+        return { incomes, expenses };
+    }, [finances, currentDate]);
+
+    const getGrowth = (current, prev) => {
+        if (prev === 0) return current > 0 ? 100 : 0;
+        return Math.round(((current - prev) / prev) * 100);
+    };
+
+    // 4. Saldos Globales
     const globalBalances = useMemo(() => {
         let cash = 0, bank = 0;
         if (finances) {
@@ -96,6 +128,7 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         return { cash, bank, total: cash + bank };
     }, [finances]);
 
+    // 5. Chart Data
     const chartData = useMemo(() => {
         if (!finances) return { trend: [], pie: [] };
         const trendMap = {};
@@ -114,7 +147,9 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
             }
         });
         const pieMap = {};
-        monthlyData.filter(f => safeNum(f.total||f.amount) < 0).forEach(f => {
+        // Usamos monthlyData sin filtros de tipo para el gráfico, pero sí de mes
+        const currentM = currentDate.toISOString().slice(0,7);
+        finances.filter(f => f.date.startsWith(currentM) && safeNum(f.total||f.amount) < 0).forEach(f => {
             const c = f.category || 'General';
             pieMap[c] = (pieMap[c] || 0) + Math.abs(safeNum(f.total||f.amount));
         });
@@ -124,15 +159,12 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         };
     }, [monthlyData, currentDate, finances]);
 
-    // --- CHART.JS CONFIG (DARK MODE) ---
+    // --- CHART.JS CONFIG ---
     useEffect(() => {
         const Chart = window.Chart;
         if (tabView !== 'dashboard' || !Chart) return;
-        
-        // Global defaults for dark mode
-        Chart.defaults.color = '#94a3b8'; // Slate 400
-        Chart.defaults.borderColor = '#334155'; // Slate 700
-
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.borderColor = '#334155';
         Object.values(chartInstances.current).forEach(c => c.destroy());
 
         if (lineChartRef.current) {
@@ -141,18 +173,14 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                 data: {
                     labels: chartData.trend.map(d => d.label),
                     datasets: [
-                        { label: 'Ingresos', data: chartData.trend.map(d => d.ingresos), borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', fill: true, tension: 0.4, pointBackgroundColor: '#10b981' },
-                        { label: 'Gastos', data: chartData.trend.map(d => d.gastos), borderColor: '#f43f5e', backgroundColor: 'rgba(244, 63, 94, 0.1)', fill: true, tension: 0.4, pointBackgroundColor: '#f43f5e' }
+                        { label: 'Ingresos', data: chartData.trend.map(d => d.ingresos), borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', fill: true, tension: 0.4 },
+                        { label: 'Gastos', data: chartData.trend.map(d => d.gastos), borderColor: '#f43f5e', backgroundColor: 'rgba(244, 63, 94, 0.1)', fill: true, tension: 0.4 }
                     ]
                 },
                 options: { 
-                    responsive: true, 
-                    maintainAspectRatio: false, 
+                    responsive: true, maintainAspectRatio: false, 
                     plugins: { legend: { labels: { color: '#cbd5e1' } } },
-                    scales: { 
-                        x: { grid: { display: false } }, 
-                        y: { grid: { color: '#1e293b' }, ticks: { color: '#64748b' } } 
-                    } 
+                    scales: { x: { grid: { display: false } }, y: { grid: { color: '#1e293b' } } } 
                 }
             });
         }
@@ -164,16 +192,10 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                     datasets: [{ 
                         data: chartData.pie.map(d => d.value), 
                         backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899'],
-                        borderWidth: 0,
-                        hoverOffset: 10
+                        borderWidth: 0
                     }]
                 },
-                options: { 
-                    responsive: true, 
-                    maintainAspectRatio: false, 
-                    plugins: { legend: { position: 'right', labels: { color: '#cbd5e1', padding: 20 } } }, 
-                    cutout: '75%' 
-                }
+                options: { responsive: true, maintainAspectRatio: false, cutout: '75%', plugins: { legend: { position: 'right', labels: { color: '#cbd5e1' } } } }
             });
         }
         return () => Object.values(chartInstances.current).forEach(c => c.destroy());
@@ -190,7 +212,6 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
             const t = safeNum(form.tithesCash)+safeNum(form.tithesTransfer)+safeNum(form.offeringsCash)+safeNum(form.offeringsTransfer);
             if(t===0) return Utils.notify("Total 0", "error");
             f.total = t; f.category = 'Culto';
-            f.tithesCash=safeNum(f.tithesCash); f.tithesTransfer=safeNum(f.tithesTransfer); 
         } else {
             const a = safeNum(form.amount); if(a===0) return Utils.notify("Monto 0", "error");
             const v = Math.abs(a); f.amount = form.type==='Gasto'?-v:v; f.total = f.amount;
@@ -198,82 +219,74 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         addData('finances', f); setIsModalOpen(false); setForm(initialForm); Utils.notify("Registrado");
     };
 
-    const toggleSelect = (id) => {
-        if (selectedIds.includes(id)) setSelectedIds(prev => prev.filter(i => i !== id));
-        else setSelectedIds(prev => [...prev, id]);
+    const handleExportCSV = () => {
+        const headers = ["ID", "Fecha", "Tipo", "Categoría", "Detalle", "Monto", "Método", "Nota"];
+        const rows = monthlyData.map(f => [
+            f.id,
+            f.date,
+            f.type,
+            f.category || 'Culto',
+            `"${(f.notes || '').replace(/"/g, '""')}"`,
+            safeNum(f.total || f.amount),
+            f.method,
+            `"${(f.notes || '').replace(/"/g, '""')}"`
+        ]);
+        const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `Movimientos_${currentDate.toISOString().slice(0,7)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     };
+
+    const toggleSelect = (id) => { if (selectedIds.includes(id)) setSelectedIds(prev => prev.filter(i => i !== id)); else setSelectedIds(prev => [...prev, id]); };
+    const handleBulkDelete = async () => { if(!confirm(`¿Borrar ${selectedIds.length}?`)) return; const batch = window.db.batch(); selectedIds.forEach(id => batch.delete(window.db.collection('finances').doc(id))); await batch.commit(); setSelectedIds([]); Utils.notify("Eliminados"); };
     
-    const selectAll = () => {
-        if (selectedIds.length === monthlyData.length) setSelectedIds([]);
-        else setSelectedIds(monthlyData.map(d => d.id));
-    };
-
-    const handleBulkDelete = async () => {
-        if(!confirm(`¿Eliminar ${selectedIds.length} movimientos?`)) return;
-        const batch = window.db.batch();
-        selectedIds.forEach(id => batch.delete(window.db.collection('finances').doc(id)));
-        await batch.commit();
-        setSelectedIds([]);
-        Utils.notify("Eliminados");
-    };
-
-    const handleExportPDF = (item = null) => {
-        const data = item || { 
-            date: new Date().toISOString(), 
-            category: 'Reporte Mensual', 
-            notes: `Balance de ${Utils.formatDate(currentDate.toISOString(), 'month')}`,
-            total: monthTotals.net,
-            id: 'RESUMEN' 
-        };
-        setPdfData(data);
+    // PDF Logic (Sin cambios mayores, solo optimización)
+    const handleExportPDF = (item) => {
+        setPdfData(item);
         setTimeout(async () => {
-            const element = printRef.current;
-            element.style.display = 'block';
-            const opt = {
-                margin: 0,
-                filename: `Comprobante_${data.id}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 3, useCORS: true },
-                jsPDF: { unit: 'mm', format: [100, 150], orientation: 'portrait' }
-            };
-            if (window.html2pdf) await window.html2pdf().set(opt).from(element).save();
-            element.style.display = 'none';
+            const el = printRef.current;
+            el.style.display = 'block';
+            if (window.html2pdf) await window.html2pdf().set({ margin:0, filename:`Comprobante.pdf`, image:{type:'jpeg',quality:0.98}, html2canvas:{scale:3}, jsPDF:{unit:'mm',format:[100,150]} }).from(el).save();
+            el.style.display = 'none';
         }, 500);
     };
 
-    const handleSaveGoal = () => {
-        const newGoals = { ...goals, [goalForm.category]: safeNum(goalForm.amount) };
-        setGoals(newGoals);
-        localStorage.setItem('finance_goals', JSON.stringify(newGoals));
-        setIsGoalModalOpen(false);
-    };
-
-    // --- RENDERIZADO ---
-
-    // Pantalla Bloqueo
+    // Render Helpers
     if (userProfile?.role !== 'Pastor') return <div className="h-full flex items-center justify-center text-slate-500">Acceso Restringido</div>;
+    
+    // Privacy Filter Class
+    const blurClass = showBalance ? '' : 'filter blur-md select-none transition-all duration-500';
+
     if (isLocked) return (
-        <div className="h-full flex flex-col items-center justify-center animate-enter bg-[#0f172a] absolute top-0 left-0 w-full z-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f172a] animate-enter">
             <div className="bg-[#1e293b] p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center border border-slate-700">
                 <div className="bg-gradient-to-tr from-brand-600 to-indigo-600 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-lg shadow-indigo-500/30">
                     <Icon name="Lock" size={32}/>
                 </div>
-                <h2 className="text-2xl font-extrabold text-white mb-2">Billetera Segura</h2>
-                <p className="text-slate-400 text-sm mb-6">Ingrese su PIN de acceso</p>
+                <h2 className="text-2xl font-extrabold text-white mb-2">Acceso Seguro</h2>
                 <form onSubmit={handleUnlock}>
-                    <input type="password" maxLength="4" 
-                        className={`text-center text-3xl font-bold w-full bg-[#0f172a] border-2 rounded-xl py-3 text-white tracking-widest outline-none transition-all ${errorPin ? 'border-red-500' : 'border-slate-700 focus:border-indigo-500'}`}
-                        value={pinInput} onChange={e=>setPinInput(e.target.value)} placeholder="••••" 
-                    />
-                    <button className="w-full mt-6 bg-white text-slate-900 font-bold py-3 rounded-xl hover:bg-indigo-50 transition-colors" onClick={handleUnlock}>
-                        Desbloquear
-                    </button>
+                    <div className="flex justify-center gap-2 mb-6">
+                        {[0,1,2,3].map(i => (
+                            <div key={i} className={`w-4 h-4 rounded-full transition-all ${pinInput.length > i ? 'bg-indigo-500 scale-110' : 'bg-slate-700'}`}></div>
+                        ))}
+                    </div>
+                    <input type="password" maxLength="4" autoFocus className="opacity-0 absolute" value={pinInput} onChange={e=>setPinInput(e.target.value)} />
+                    <div className="grid grid-cols-3 gap-3">
+                        {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} type="button" onClick={()=>setPinInput(p=> (p+n).slice(0,4))} className="h-14 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xl transition-colors">{n}</button>)}
+                        <div/>
+                        <button type="button" onClick={()=>setPinInput(p=> (p+0).slice(0,4))} className="h-14 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xl">0</button>
+                        <button type="button" onClick={()=>setPinInput(p=>p.slice(0,-1))} className="h-14 rounded-xl bg-slate-800 hover:bg-slate-700 text-red-400 flex items-center justify-center"><Icon name="Delete" size={20}/></button>
+                    </div>
+                    {errorPin && <p className="text-red-500 text-xs mt-4 animate-pulse">PIN Incorrecto</p>}
+                    <Button className="w-full mt-6" onClick={handleUnlock}>Ingresar</Button>
                 </form>
             </div>
         </div>
     );
-
-    const renderAmount = (a) => showBalance ? formatCurrency(safeNum(a)) : "$ ••••••";
 
     return (
         <div className="min-h-screen bg-[#0f172a] text-slate-200 font-sans -m-4 sm:-m-8 p-4 sm:p-8 pb-32">
@@ -281,19 +294,18 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
             {/* HEADER */}
             <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-8">
                 <div className="flex items-center gap-4 w-full md:w-auto">
-                    <div className="bg-indigo-600 p-2 rounded-lg"><Icon name="Wallet" className="text-white"/></div>
+                    <div className="bg-indigo-600 p-2 rounded-lg shadow-lg shadow-indigo-500/30"><Icon name="Wallet" className="text-white"/></div>
                     <div>
                         <h2 className="text-2xl font-extrabold text-white leading-none">Tesorería</h2>
                         <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Panel Financiero</span>
                     </div>
-                    <button onClick={()=>setShowBalance(!showBalance)} className="ml-2 text-slate-500 hover:text-white transition-colors">
+                    <button onClick={()=>setShowBalance(!showBalance)} className="ml-2 p-2 rounded-full hover:bg-slate-800 text-slate-500 hover:text-white transition-colors">
                         <Icon name={showBalance?"Eye":"EyeOff"} size={18}/>
                     </button>
                 </div>
                 
                 <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
                     <div className="bg-[#1e293b] p-1 rounded-xl shadow-sm border border-slate-700 flex items-center">
-                         {/* Asumiendo que DateFilter acepta custom styles o es lo suficientemente neutro. Si no, habría que envolverlo. */}
                          <div className="text-slate-300 [&>select]:bg-transparent [&>select]:text-white [&>select]:border-none">
                             <DateFilter currentDate={currentDate} onChange={setCurrentDate} />
                          </div>
@@ -318,31 +330,31 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
             {/* DASHBOARD */}
             {tabView === 'dashboard' && (
                 <div className="space-y-6 animate-enter">
-                    {/* Tarjetas Resumen */}
+                    {/* Tarjetas Resumen con Smart Insights */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="bg-[#1e293b] p-6 rounded-3xl shadow-xl border border-slate-700 relative overflow-hidden group">
-                            <div className="absolute right-0 top-0 p-32 bg-emerald-500/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
-                            <div className="relative z-10">
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className="p-3 bg-emerald-500/20 rounded-2xl text-emerald-400"><Icon name="ArrowUpRight" size={24}/></div>
-                                    <span className="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-2 py-1 rounded-full uppercase">Ingresos</span>
+                        {[
+                            { title: 'Ingresos', val: monthTotals.incomes, prev: prevMonthTotals.incomes, color: 'emerald', icon: 'ArrowUpRight' },
+                            { title: 'Gastos', val: monthTotals.expenses, prev: prevMonthTotals.expenses, color: 'rose', icon: 'ArrowDownRight' },
+                        ].map((card, i) => {
+                            const growth = getGrowth(card.val, card.prev);
+                            return (
+                                <div key={i} className="bg-[#1e293b] p-6 rounded-3xl shadow-xl border border-slate-700 relative overflow-hidden group">
+                                    <div className={`absolute right-0 top-0 p-32 bg-${card.color}-500/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none`}></div>
+                                    <div className="relative z-10">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className={`p-3 bg-${card.color}-500/20 rounded-2xl text-${card.color}-400`}><Icon name={card.icon} size={24}/></div>
+                                            <div className="text-right">
+                                                <span className={`block text-[10px] font-bold uppercase text-${card.color}-400`}>{card.title}</span>
+                                                <div className={`text-xs font-bold flex items-center justify-end gap-1 ${growth >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                    {growth > 0 ? '▲' : '▼'} {Math.abs(growth)}% <span className="text-slate-500 font-normal">vs mes ant.</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <h3 className={`text-3xl font-black text-white tracking-tight ${blurClass}`}>{showBalance ? formatCurrency(card.val) : '$ ••••'}</h3>
+                                    </div>
                                 </div>
-                                <h3 className="text-3xl font-black text-white tracking-tight">{renderAmount(monthTotals.incomes)}</h3>
-                                <p className="text-slate-500 text-xs mt-1 font-medium">Total recaudado este mes</p>
-                            </div>
-                        </div>
-
-                        <div className="bg-[#1e293b] p-6 rounded-3xl shadow-xl border border-slate-700 relative overflow-hidden group">
-                            <div className="absolute right-0 top-0 p-32 bg-rose-500/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
-                            <div className="relative z-10">
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className="p-3 bg-rose-500/20 rounded-2xl text-rose-400"><Icon name="ArrowDownRight" size={24}/></div>
-                                    <span className="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-2 py-1 rounded-full uppercase">Gastos</span>
-                                </div>
-                                <h3 className="text-3xl font-black text-white tracking-tight">{renderAmount(monthTotals.expenses)}</h3>
-                                <p className="text-slate-500 text-xs mt-1 font-medium">Total egresos este mes</p>
-                            </div>
-                        </div>
+                            );
+                        })}
 
                         <div className="bg-gradient-to-br from-indigo-600 to-violet-700 p-6 rounded-3xl shadow-xl shadow-indigo-600/20 relative overflow-hidden text-white">
                             <div className="absolute right-0 bottom-0 p-24 bg-white/10 rounded-full blur-2xl -mr-10 -mb-10 pointer-events-none"></div>
@@ -351,25 +363,25 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                                     <div className="p-3 bg-white/20 rounded-2xl backdrop-blur-sm"><Icon name="Wallet" size={24}/></div>
                                     <span className="bg-white/20 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase">Balance Neto</span>
                                 </div>
-                                <h3 className="text-4xl font-black tracking-tight mb-1">{renderAmount(monthTotals.net)}</h3>
-                                <div className="flex items-center gap-2 mt-4 text-indigo-100 text-xs font-medium bg-black/20 p-2 rounded-lg w-fit">
-                                    <span>Caja: {renderAmount(globalBalances.cash)}</span>
+                                <h3 className={`text-4xl font-black tracking-tight mb-1 ${blurClass}`}>{showBalance ? formatCurrency(monthTotals.net) : '$ ••••'}</h3>
+                                <div className={`flex items-center gap-2 mt-4 text-indigo-100 text-xs font-medium bg-black/20 p-2 rounded-lg w-fit ${blurClass}`}>
+                                    <span>Caja: {showBalance ? formatCurrency(globalBalances.cash) : '•••'}</span>
                                     <span className="w-px h-3 bg-white/30"></span>
-                                    <span>Banco: {renderAmount(globalBalances.bank)}</span>
+                                    <span>Banco: {showBalance ? formatCurrency(globalBalances.bank) : '•••'}</span>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Gráficos */}
+                    {/* Gráficos con Blur */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-2 bg-[#1e293b] rounded-3xl p-6 border border-slate-700 shadow-xl">
                             <h3 className="font-bold text-xs uppercase text-slate-400 mb-6 flex items-center gap-2"><Icon name="Activity" size={14}/> Tendencia Semestral</h3>
-                            <div className="h-64 w-full relative"><canvas ref={lineChartRef}></canvas></div>
+                            <div className={`h-64 w-full relative ${blurClass}`}><canvas ref={lineChartRef}></canvas></div>
                         </div>
                         <div className="bg-[#1e293b] rounded-3xl p-6 border border-slate-700 shadow-xl flex flex-col">
                             <h3 className="font-bold text-xs uppercase text-slate-400 mb-6 flex items-center gap-2"><Icon name="PieChart" size={14}/> Distribución</h3>
-                            <div className="h-48 w-full relative flex-1 flex justify-center items-center">
+                            <div className={`h-48 w-full relative flex-1 flex justify-center items-center ${blurClass}`}>
                                 {chartData.pie.length > 0 ? <canvas ref={pieChartRef}></canvas> : <p className="text-xs text-slate-500">Sin datos de gastos</p>}
                             </div>
                         </div>
@@ -377,31 +389,41 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                 </div>
             )}
 
-            {/* LISTA MOVIMIENTOS (MODERNA CON ACORDEÓN) */}
+            {/* LISTA MOVIMIENTOS */}
             {tabView === 'list' && (
                 <div className="space-y-4 animate-enter relative">
-                    {/* Buscador y Filtros */}
-                    <div className="flex items-center gap-3 bg-[#1e293b] p-3 rounded-2xl shadow-sm border border-slate-700 sticky top-0 z-30 backdrop-blur-md bg-opacity-80">
-                        <Icon name="Search" size={20} className="text-slate-400 ml-2"/>
-                        <input className="w-full bg-transparent border-none text-sm outline-none text-white placeholder-slate-500 font-medium" placeholder="Buscar por concepto o nota..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
+                    {/* Filtros Avanzados y Exportación */}
+                    <div className="flex flex-col md:flex-row gap-4 bg-[#1e293b] p-3 rounded-2xl shadow-sm border border-slate-700 sticky top-0 z-30 backdrop-blur-md bg-opacity-90">
+                        <div className="flex items-center gap-2 bg-slate-800/50 rounded-xl px-3 py-2 flex-1">
+                            <Icon name="Search" size={18} className="text-slate-400"/>
+                            <input className="w-full bg-transparent border-none text-sm outline-none text-white placeholder-slate-500 font-medium" placeholder="Buscar..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
+                        </div>
+                        
+                        <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 scrollbar-hide">
+                            {[
+                                { id: 'all', label: 'Todos' },
+                                { id: 'income', label: 'Ingresos' },
+                                { id: 'expense', label: 'Gastos' }
+                            ].map(f => (
+                                <button key={f.id} onClick={()=>setFilterType(f.id)} 
+                                    className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${filterType===f.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+                                    {f.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        <button onClick={handleExportCSV} className="px-4 py-2 rounded-xl bg-slate-800 text-emerald-400 hover:bg-slate-700 font-bold text-xs flex items-center gap-2 transition-colors border border-slate-700">
+                            <Icon name="Download" size={16}/> CSV
+                        </button>
                     </div>
 
                     {monthlyData.length === 0 ? (
-                        <div className="p-12 text-center border-2 border-dashed border-slate-700 rounded-3xl">
+                        <div className="p-12 text-center border-2 border-dashed border-slate-700 rounded-3xl opacity-50">
                             <div className="bg-slate-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-600"><Icon name="Inbox" size={32}/></div>
-                            <p className="text-slate-500 font-medium">No hay movimientos en este periodo.</p>
+                            <p className="text-slate-400 font-medium">No se encontraron movimientos.</p>
                         </div>
                     ) : (
                         <div className="space-y-3 pb-24">
-                            {/* ENCABEZADOS DE TABLA (SOLO DESKTOP) */}
-                            <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-2 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                                <div className="col-span-1 text-center">Sel</div>
-                                <div className="col-span-2">Fecha</div>
-                                <div className="col-span-5">Detalle</div>
-                                <div className="col-span-3 text-right">Monto</div>
-                                <div className="col-span-1 text-center">Acc</div>
-                            </div>
-
                             {monthlyData.map(f => {
                                 const amount = safeNum(f.total||f.amount);
                                 const isExpanded = expandedId === f.id;
@@ -414,75 +436,68 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                                         ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500 bg-indigo-900/10' : 'border-slate-700 hover:border-slate-500'}
                                         ${isExpanded ? 'shadow-2xl shadow-black/50 z-10 scale-[1.01]' : 'shadow-sm'}`}
                                     >
-                                        {/* LAYOUT MÓVIL (Tarjeta) Y DESKTOP (Fila) HÍBRIDO */}
-                                        <div className="p-4 md:py-3 md:px-6 grid md:grid-cols-12 gap-4 items-center cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : f.id)}>
-                                            
-                                            {/* Checkbox (Visible en Móvil y Desktop) */}
-                                            <div className="flex justify-between items-center md:col-span-1 md:justify-center">
-                                                <div onClick={(e)=>e.stopPropagation()} className="relative">
-                                                    <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(f.id)} 
-                                                        className="w-5 h-5 rounded-md border-slate-600 bg-slate-800 checked:bg-indigo-500 transition-colors cursor-pointer"/>
-                                                </div>
-                                                {/* Mobile Only Date */}
-                                                <span className="md:hidden text-xs text-slate-500 font-medium">{formatDate(f.date)}</span>
-                                            </div>
-
-                                            {/* Date (Desktop) */}
-                                            <div className="hidden md:block col-span-2 text-sm text-slate-400 font-medium">
-                                                {formatDate(f.date)}
-                                            </div>
-
-                                            {/* Detalle */}
-                                            <div className="col-span-12 md:col-span-5 flex items-center gap-3">
-                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-inner
+                                        <div className="p-4 flex flex-col md:flex-row gap-4 items-center cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : f.id)}>
+                                            <div className="flex w-full md:w-auto items-center justify-between gap-4">
+                                                <input type="checkbox" checked={isSelected} onChange={(e)=>{e.stopPropagation(); toggleSelect(f.id)}} className="w-5 h-5 rounded border-slate-600 bg-slate-800 checked:bg-indigo-500 cursor-pointer"/>
+                                                
+                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-inner flex-shrink-0
                                                     ${isIncome ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
                                                     <Icon name={f.type === 'Culto' ? 'Church' : (categories.find(c=>c.value===f.category)?.icon || 'Tag')} size={18}/>
                                                 </div>
-                                                <div>
-                                                    <div className="font-bold text-slate-200 text-base">{f.type==='Culto'?'Culto General':f.category}</div>
-                                                    <div className="text-xs text-slate-500 truncate max-w-[200px]">{f.notes || f.method}</div>
+
+                                                <div className="md:hidden text-right flex-1">
+                                                    <div className={`font-mono text-lg font-bold ${isIncome ? 'text-emerald-400' : 'text-rose-400'} ${blurClass}`}>
+                                                        {showBalance ? formatCurrency(amount) : '$ •••'}
+                                                    </div>
+                                                    <div className="text-xs text-slate-500">{formatDate(f.date)}</div>
                                                 </div>
                                             </div>
 
-                                            {/* Monto */}
-                                            <div className="col-span-12 md:col-span-3 flex justify-between md:justify-end items-center">
-                                                <span className="md:hidden text-xs text-slate-500 uppercase font-bold">Total</span>
-                                                <span className={`font-mono text-lg font-bold ${isIncome ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                    {formatCurrency(amount)}
-                                                </span>
-                                            </div>
-
-                                            {/* Icono Acordeón (Desktop) */}
-                                            <div className="hidden md:flex col-span-1 justify-center text-slate-500">
-                                                <Icon name={isExpanded ? "ChevronUp" : "ChevronDown"} size={18}/>
+                                            <div className="flex-1 hidden md:block">
+                                                <div className="flex justify-between items-center">
+                                                    <div>
+                                                        <div className="font-bold text-slate-200">{f.type==='Culto'?'Culto General':f.category}</div>
+                                                        <div className="text-xs text-slate-500 max-w-md truncate">{f.notes || f.method}</div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className={`font-mono text-lg font-bold ${isIncome ? 'text-emerald-400' : 'text-rose-400'} ${blurClass}`}>
+                                                            {showBalance ? formatCurrency(amount) : '$ ••••••'}
+                                                        </div>
+                                                        <div className="text-xs text-slate-500">{formatDate(f.date)}</div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
 
-                                        {/* SECCIÓN EXPANDIBLE (ACORDEÓN) */}
+                                        {/* ACCORDEON DETAILS */}
                                         <div className={`overflow-hidden transition-all duration-300 ease-in-out bg-[#0f172a]/50 border-t border-slate-700/50 ${isExpanded ? 'max-h-96 opacity-100 p-4' : 'max-h-0 opacity-0'}`}>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                                                 <div className="space-y-2">
-                                                    <p className="text-slate-400 text-xs uppercase font-bold">Detalles de Pago</p>
+                                                    <p className="text-slate-400 text-xs uppercase font-bold">Detalles</p>
                                                     <div className="flex justify-between border-b border-slate-700 pb-1">
-                                                        <span className="text-slate-300">Método</span>
+                                                        <span className="text-slate-300">ID Operación</span>
+                                                        <span className="text-slate-500 font-mono">#{f.id.slice(0,8)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between border-b border-slate-700 pb-1">
+                                                        <span className="text-slate-300">Método de Pago</span>
                                                         <span className="text-white font-medium">{f.method}</span>
                                                     </div>
                                                     {f.type === 'Culto' && (
                                                         <>
                                                         <div className="flex justify-between border-b border-slate-700 pb-1">
-                                                            <span className="text-slate-300">Diezmos</span>
-                                                            <span className="text-emerald-400 font-mono">{formatCurrency(safeNum(f.tithesCash)+safeNum(f.tithesTransfer))}</span>
+                                                            <span className="text-slate-300">Diezmos (Total)</span>
+                                                            <span className={`text-emerald-400 font-mono ${blurClass}`}>{showBalance ? formatCurrency(safeNum(f.tithesCash)+safeNum(f.tithesTransfer)) : '•••'}</span>
                                                         </div>
                                                         <div className="flex justify-between border-b border-slate-700 pb-1">
-                                                            <span className="text-slate-300">Ofrendas</span>
-                                                            <span className="text-emerald-400 font-mono">{formatCurrency(safeNum(f.offeringsCash)+safeNum(f.offeringsTransfer))}</span>
+                                                            <span className="text-slate-300">Ofrendas (Total)</span>
+                                                            <span className={`text-emerald-400 font-mono ${blurClass}`}>{showBalance ? formatCurrency(safeNum(f.offeringsCash)+safeNum(f.offeringsTransfer)) : '•••'}</span>
                                                         </div>
                                                         </>
                                                     )}
                                                 </div>
                                                 <div className="space-y-3 flex flex-col justify-between">
                                                     <div>
-                                                        <p className="text-slate-400 text-xs uppercase font-bold mb-1">Notas</p>
+                                                        <p className="text-slate-400 text-xs uppercase font-bold mb-1">Nota Adjunta</p>
                                                         <p className="text-slate-300 italic text-xs bg-slate-800 p-2 rounded-lg">{f.notes || "Sin notas adicionales."}</p>
                                                     </div>
                                                     
@@ -504,8 +519,8 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                             })}
                         </div>
                     )}
-
-                    {/* Barra Flotante Acciones (Fixed para que no se pierda) */}
+                    
+                    {/* Bulk Actions */}
                     {selectedIds.length > 0 && (
                         <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white text-slate-900 px-6 py-4 rounded-full shadow-2xl flex items-center gap-6 animate-enter z-50 min-w-[300px] justify-between border-4 border-slate-900/10">
                             <div className="flex flex-col">
@@ -536,24 +551,28 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                             const spent = Math.abs(safeNum(chartData.pie.find(p=>p.name===cat.value)?.value || 0));
                             const goal = goals[cat.value] || 0;
                             const pct = goal > 0 ? Math.min(100, Math.round((spent/goal)*100)) : 0;
+                            const isCritical = pct > 85;
                             const statusColor = pct > 90 ? 'bg-rose-500' : (pct > 70 ? 'bg-amber-500' : 'bg-emerald-500');
                             const textColor = pct > 90 ? 'text-rose-400' : (pct > 70 ? 'text-amber-400' : 'text-emerald-400');
                             
                             return (
-                                <div key={cat.value} className="bg-[#1e293b] border border-slate-700 p-5 rounded-2xl relative overflow-hidden">
+                                <div key={cat.value} className={`bg-[#1e293b] border ${isCritical ? 'border-rose-500/50 animate-pulse' : 'border-slate-700'} p-5 rounded-2xl relative overflow-hidden transition-all`}>
                                     <div className="flex justify-between items-center mb-3">
                                         <div className="flex items-center gap-3">
                                             <div className="p-2 bg-slate-800 rounded-lg" style={{color: cat.color}}><Icon name={cat.icon} size={20}/></div>
                                             <h4 className="font-bold text-slate-200">{cat.label}</h4>
                                         </div>
-                                        <span className={`text-sm font-black ${textColor}`}>{pct}%</span>
+                                        <div className="flex items-center gap-2">
+                                            {isCritical && <Icon name="AlertTriangle" size={16} className="text-rose-500"/>}
+                                            <span className={`text-sm font-black ${textColor}`}>{pct}%</span>
+                                        </div>
                                     </div>
                                     <div className="w-full bg-slate-800 rounded-full h-2 mb-3 overflow-hidden">
                                         <div className={`h-full ${statusColor} shadow-[0_0_10px_rgba(0,0,0,0.5)] transition-all duration-1000 ease-out`} style={{width: `${pct}%`, boxShadow: `0 0 10px ${statusColor}`}}></div>
                                     </div>
                                     <div className="flex justify-between text-xs font-mono">
-                                        <span className="text-slate-400">Gastado: <span className="text-white font-bold">{formatCurrency(spent)}</span></span>
-                                        <span className="text-slate-500">Meta: {formatCurrency(goal)}</span>
+                                        <span className="text-slate-400">Gastado: <span className={`font-bold ${blurClass}`}>{showBalance ? formatCurrency(spent) : '•••'}</span></span>
+                                        <span className="text-slate-500">Meta: {showBalance ? formatCurrency(goal) : '•••'}</span>
                                     </div>
                                 </div>
                             );
