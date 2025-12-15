@@ -313,8 +313,10 @@ window.Views.Messaging = ({ userProfile }) => {
                 // 1. Calcular destinatarios para la Push
                 let targetTokens = [];
                 
-                // Filtramos a todos los miembros que tienen token y NO son el que envía
-                const potentialRecipients = members.filter(m => m.pushToken && m.id !== userProfile.id);
+                // --- MODO DEBUG ACTIVADO: Permitimos enviarnos a nosotros mismos ---
+                // ANTES: const potentialRecipients = members.filter(m => m.pushToken && m.id !== userProfile.id);
+                // AHORA (Para pruebas): 
+                const potentialRecipients = members.filter(m => m.pushToken);
 
                 if (recipient === 'all') {
                     targetTokens = potentialRecipients.map(m => m.pushToken);
@@ -339,11 +341,17 @@ window.Views.Messaging = ({ userProfile }) => {
                 }
 
                 // 2. Enviar si hay destinatarios y tenemos la lógica cargada
+                console.log("Intentando enviar push a:", targetTokens.length, "dispositivos.");
+                
                 if (targetTokens.length > 0 && window.NotificationLogic?.sendPushNotification) {
                     const pushTitle = finalCategory === 'General' ? 'Nuevo Mensaje' : finalCategory;
-                    const pushBody = composeForm.content; // Usamos el título del mensaje como cuerpo de la notificación
-                    
+                    const pushBody = composeForm.content; 
                     window.NotificationLogic.sendPushNotification(targetTokens, pushTitle, pushBody);
+                } else {
+                    if(targetTokens.length === 0) {
+                        // Diagnóstico visual para el usuario
+                        Utils.notify("Mensaje guardado, pero nadie tiene notificaciones activas para recibirlo.", "warning");
+                    }
                 }
 
                 Utils.notify("Enviado");
@@ -524,8 +532,9 @@ window.Views.Messaging = ({ userProfile }) => {
             } else {
                 // Es grupo o ministerio, notificar a todos MENOS al que envía
                 const recipients = getGroupMembers(selectedChat);
+                // MODO DEBUG: Permitimos enviarnos a nosotros mismos
                 targetTokens = recipients
-                    .filter(m => m.id !== userProfile.id && m.pushToken)
+                    .filter(m => m.pushToken) // Quitamos la restricción de id
                     .map(m => m.pushToken);
             }
 
