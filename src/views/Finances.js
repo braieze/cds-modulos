@@ -20,13 +20,13 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
     // Selección Múltiple
     const [selectedIds, setSelectedIds] = useState([]);
 
-    // Seguridad PIN
+    // Seguridad PIN (MEJORADO)
     const [isLocked, setIsLocked] = useState(true);
     const [pinInput, setPinInput] = useState('');
     const [errorPin, setErrorPin] = useState(false);
+    const pinInputRef = useRef(null); // Ref para foco automático
 
     // Formularios
-    // Agregamos fields para allocation (destinar a meta) y recurring (fijo)
     const initialForm = { 
         type: 'Culto', date: Utils.getLocalDate(), 
         tithesCash: '', tithesTransfer: '', offeringsCash: '', offeringsTransfer: '', 
@@ -35,7 +35,7 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
     };
     const [form, setForm] = useState(initialForm);
 
-    // Metas (Persistencia Local v3 para soportar acumulado manual)
+    // Metas
     const [goals, setGoals] = useState(() => JSON.parse(localStorage.getItem('finance_goals_v3')) || []);
     const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
     const [goalForm, setGoalForm] = useState({ id: null, category: '', amount: '', type: 'spending', label: '', currentSaved: 0 });
@@ -43,6 +43,7 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
     // Referencias Gráficos
     const printRef = useRef(null);
     const [pdfData, setPdfData] = useState(null);
+    
     // Chart Refs
     const chartRefs = {
         projection: useRef(null),
@@ -97,7 +98,7 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         return { incomes, expenses, net: incomes - expenses };
     }, [monthlyData]);
 
-    // 3. Saldos Globales Reales (Histórico Completo)
+    // 3. Saldos Globales Reales
     const globalBalances = useMemo(() => {
         let cash = 0, bank = 0;
         if (finances) {
@@ -119,14 +120,14 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
     const chartData = useMemo(() => {
         if (!finances) return null;
         
-        // A. Breakdown (Torta) - Solo Gastos Mes Actual
+        // A. Breakdown (Torta)
         const pieMap = {};
         monthlyData.filter(f => safeNum(f.total||f.amount) < 0).forEach(f => {
             const c = f.category || 'General';
             pieMap[c] = (pieMap[c] || 0) + Math.abs(safeNum(f.total||f.amount));
         });
 
-        // B. Daily (Barras) - Ingresos vs Gastos por día
+        // B. Daily (Barras)
         const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
         const dailyLabels = Array.from({length: daysInMonth}, (_, i) => i + 1);
         const dailyIncome = new Array(daysInMonth).fill(0);
@@ -141,16 +142,14 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
             }
         });
 
-        // C. Projection (Lineal) - Acumulado del mes + Proyección
+        // C. Projection (Lineal)
         const cumulative = [];
         let runningTotal = 0;
-        // Orden ascendente para el gráfico
         const sortedMonth = [...monthlyData].sort((a,b) => new Date(a.date) - new Date(b.date));
         sortedMonth.forEach(f => {
              runningTotal += safeNum(f.total || f.amount);
              cumulative.push(runningTotal);
         });
-        // Proyección simple: promedio diario * días restantes
         const today = new Date();
         const isCurrentMonth = today.getMonth() === currentDate.getMonth() && today.getFullYear() === currentDate.getFullYear();
         let projection = null;
@@ -176,19 +175,14 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         Chart.defaults.color = '#94a3b8'; 
         Chart.defaults.borderColor = 'rgba(255,255,255,0.05)';
         
-        // Limpiar instancias previas
         Object.values(chartInstances.current).forEach(c => c && c.destroy());
 
-        // 1. Projection Chart (En Tab Stats)
         if (chartRefs.projection.current && tabView === 'stats') {
             const ctx = chartRefs.projection.current.getContext('2d');
             const gradient = ctx.createLinearGradient(0, 0, 0, 400);
-            gradient.addColorStop(0, 'rgba(99, 102, 241, 0.5)'); // Indigo
+            gradient.addColorStop(0, 'rgba(99, 102, 241, 0.5)');
             gradient.addColorStop(1, 'rgba(99, 102, 241, 0.0)');
 
-            const dataPoints = chartData.daily.income.map((inc, i) => inc - chartData.daily.expense[i]); // Net daily roughly
-            // Simplificado para proyección: Usamos una línea recta desde 0 hasta el total actual
-            
             chartInstances.current.projection = new Chart(chartRefs.projection.current, {
                 type: 'line',
                 data: {
@@ -207,7 +201,6 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
             });
         }
 
-        // 2. Breakdown Pie (En Tab Stats)
         if (chartRefs.breakdown.current && tabView === 'stats') {
             chartInstances.current.breakdown = new Chart(chartRefs.breakdown.current, {
                 type: 'doughnut',
@@ -223,8 +216,7 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
             });
         }
 
-        // 3. Daily Bars (En Dashboard o Stats)
-        const dailyRef = tabView === 'dashboard' ? chartRefs.trend : chartRefs.daily; // Reutilizamos ref para dashboard
+        const dailyRef = tabView === 'dashboard' ? chartRefs.trend : chartRefs.daily;
         if (dailyRef && dailyRef.current) {
             chartInstances.current.daily = new Chart(dailyRef.current, {
                 type: 'bar',
@@ -247,9 +239,45 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         return () => Object.values(chartInstances.current).forEach(c => c && c.destroy());
     }, [chartData, tabView, monthTotals]);
 
+    // --- EFECTOS & LÓGICA PIN MEJORADA ---
+    
+    // 1. Auto-Focus al montar y validación automática
+    useEffect(() => {
+        if (isLocked) {
+            // Intentar enfocar el input invisible para que salga el teclado en móvil
+            setTimeout(() => {
+                if (pinInputRef.current) pinInputRef.current.focus();
+            }, 100);
+        }
+
+        // Auto-Validación al llegar a 4 dígitos
+        if (pinInput.length === 4) {
+            if (pinInput === '1234') {
+                setIsLocked(false);
+                setErrorPin(false);
+            } else {
+                setErrorPin(true);
+                Utils.notify("PIN Incorrecto", "error");
+                setPinInput(''); // Borrar input para reintentar
+            }
+        }
+    }, [isLocked, pinInput]);
+
+    // Manejo de clicks en el fondo para recuperar el foco
+    const handleBackgroundClick = () => {
+        if (isLocked && pinInputRef.current) {
+            pinInputRef.current.focus();
+        }
+    };
+
+    // Manejo de botones virtuales (suman al string existente)
+    const handleVirtualKey = (n) => {
+        setPinInput(prev => (prev + n).slice(0, 4));
+        if (pinInputRef.current) pinInputRef.current.focus(); // Mantener teclado activo si se desea
+    };
+
 
     // --- ACCIONES ---
-    const handleUnlock = (e) => { e.preventDefault(); if (pinInput === '1234') { setIsLocked(false); setErrorPin(false); } else { setErrorPin(true); setPinInput(''); } };
     const toggleSelect = (id) => { if (selectedIds.includes(id)) setSelectedIds(prev => prev.filter(i => i !== id)); else setSelectedIds(prev => [...prev, id]); };
     const selectAll = () => { if (selectedIds.length === monthlyData.length) setSelectedIds([]); else setSelectedIds(monthlyData.map(d => d.id)); };
     
@@ -262,10 +290,38 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         Utils.notify("Eliminados correctamente");
     };
 
+    // --- CABO SUELTO SOLUCIONADO: handleImage ---
+    const handleImage = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        setIsUploading(true);
+        try {
+            // Si Utils tiene compressImage, la usamos, sino un lector básico
+            let result;
+            if (Utils.compressImage) {
+                result = await Utils.compressImage(file);
+            } else {
+                result = await new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.readAsDataURL(file);
+                });
+            }
+            setForm(prev => ({ ...prev, attachmentUrl: result }));
+            Utils.notify("Imagen adjuntada");
+        } catch (error) {
+            console.error(error);
+            Utils.notify("Error al subir imagen", "error");
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
     const handleSave = () => { 
         let f = {...form, createdAt: new Date().toISOString() };
         
-        // Validación y Calculo de Totales
+        // Validación
         if(form.type==='Culto') {
             const t = safeNum(form.tithesCash)+safeNum(form.tithesTransfer)+safeNum(form.offeringsCash)+safeNum(form.offeringsTransfer);
             if(t===0) return Utils.notify("Total 0 no permitido", "error");
@@ -275,11 +331,10 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
             const v = Math.abs(a); f.amount = form.type==='Gasto'?-v:v; f.total = f.amount;
         }
 
-        // Lógica de Asignación a Meta (Sobres)
+        // Asignación a Meta
         if ((form.type === 'Ingreso' || form.type === 'Culto') && form.allocateToGoalId && safeNum(form.allocationAmount) > 0) {
             const goalId = form.allocateToGoalId;
             const allocAmount = safeNum(form.allocationAmount);
-            // Actualizar Meta Localmente
             const updatedGoals = goals.map(g => {
                 if (g.id === goalId) {
                     return { ...g, currentSaved: (g.currentSaved || 0) + allocAmount };
@@ -341,10 +396,8 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         let current = 0;
         
         if (goal.type === 'saving') {
-            // Para ahorro, usamos el valor acumulado manualmente ("Sobre")
             current = safeNum(goal.currentSaved);
         } else {
-            // Para gasto, sumamos los gastos reales del mes
             monthlyData.forEach(f => {
                 const val = safeNum(f.total || f.amount);
                 if (val < 0 && (f.category === goal.category || (goal.category === 'Culto' && f.type === 'Culto'))) {
@@ -356,28 +409,55 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         return { current, target, pct };
     };
     
-    // Calcular "Dinero en Sobres" vs "Dinero Libre"
     const totalAllocated = goals.filter(g => g.type === 'saving').reduce((acc, g) => acc + safeNum(g.currentSaved), 0);
     const freeBalance = globalBalances.total - totalAllocated;
 
     // --- RENDER ---
     if (userProfile?.role !== 'Pastor') return <div className="h-full flex items-center justify-center text-slate-500">Acceso Restringido</div>;
     
+    // --- PANTALLA DE BLOQUEO ACTUALIZADA ---
     if (isLocked) return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050511] animate-enter">
+        <div 
+            onClick={handleBackgroundClick} // 1. Foco al tocar fondo
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050511] animate-enter cursor-pointer"
+        >
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/40 via-purple-900/20 to-black pointer-events-none"></div>
-            <div className="relative bg-white/5 backdrop-blur-2xl p-8 rounded-[32px] shadow-2xl border border-white/10 max-w-sm w-full text-center">
-                <div className="bg-indigo-500 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-lg shadow-indigo-500/50"><Icon name="Lock" size={28}/></div>
-                <h2 className="text-2xl font-black text-white mb-6">Finanzas</h2>
-                <form onSubmit={handleUnlock}>
-                    <input type="password" maxLength="4" autoFocus className="opacity-0 absolute" value={pinInput} onChange={e=>setPinInput(e.target.value)} />
-                    <div className="grid grid-cols-3 gap-3">
-                        {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} type="button" onClick={()=>setPinInput(p=> (p+n).slice(0,4))} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl border border-white/5">{n}</button>)}
-                        <div/>
-                        <button type="button" onClick={()=>setPinInput(p=> (p+0).slice(0,4))} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl border border-white/5">0</button>
-                        <button type="button" onClick={()=>setPinInput(p=>p.slice(0,-1))} className="h-14 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center border border-red-500/10"><Icon name="Delete" size={20}/></button>
-                    </div>
-                </form>
+            <div className="relative bg-white/5 backdrop-blur-2xl p-8 rounded-[32px] shadow-2xl border border-white/10 max-w-sm w-full text-center" onClick={e => e.stopPropagation()}>
+                <div className={`bg-indigo-500 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-lg shadow-indigo-500/50 transition-all ${errorPin ? 'animate-shake bg-red-500 shadow-red-500/50' : ''}`}>
+                    <Icon name={errorPin ? "AlertCircle" : "Lock"} size={28}/>
+                </div>
+                <h2 className="text-2xl font-black text-white mb-2">Finanzas</h2>
+                <p className="text-slate-400 text-sm mb-6">Ingresa el PIN de seguridad</p>
+                
+                {/* Input Híbrido: Invisible pero enfocado */}
+                <input 
+                    ref={pinInputRef}
+                    type="number" // Numeric para teclado móvil
+                    pattern="[0-9]*"
+                    inputMode="numeric"
+                    maxLength="4" 
+                    className="opacity-0 absolute top-0 left-0 w-full h-full pointer-events-none" // pointer-events-none para que el click pase al div wrapper si es necesario, o manejarlo con el ref
+                    value={pinInput} 
+                    onChange={e => setPinInput(e.target.value.slice(0,4))} 
+                    onBlur={() => setTimeout(() => pinInputRef.current?.focus(), 100)} // Intentar mantener foco
+                />
+
+                {/* Indicadores visuales de dígitos */}
+                <div className="flex justify-center gap-4 mb-8">
+                    {[0, 1, 2, 3].map(i => (
+                        <div key={i} className={`w-4 h-4 rounded-full transition-all duration-300 ${i < pinInput.length ? 'bg-indigo-500 scale-110 shadow-[0_0_10px_#6366f1]' : 'bg-white/10'}`}></div>
+                    ))}
+                </div>
+
+                {/* Botones Virtuales */}
+                <div className="grid grid-cols-3 gap-3">
+                    {[1,2,3,4,5,6,7,8,9].map(n => (
+                        <button key={n} type="button" onClick={() => handleVirtualKey(n)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl border border-white/5 active:scale-95 transition-all">{n}</button>
+                    ))}
+                    <div/>
+                    <button type="button" onClick={() => handleVirtualKey(0)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl border border-white/5 active:scale-95 transition-all">0</button>
+                    <button type="button" onClick={() => setPinInput(p=>p.slice(0,-1))} className="h-14 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center border border-red-500/10 hover:bg-red-500/20 active:scale-95 transition-all"><Icon name="Delete" size={20}/></button>
+                </div>
             </div>
         </div>
     );
@@ -671,8 +751,17 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                     )}
 
                     <Input label="Notas" value={form.notes} onChange={e=>setForm({...form, notes:e.target.value})}/>
-                    <div className="flex gap-3"><label className={`flex-1 p-3 border-2 border-dashed rounded-xl flex justify-center items-center gap-2 cursor-pointer ${form.attachmentUrl?'border-emerald-500 bg-emerald-50 text-emerald-600':'border-slate-300'}`}><Icon name="Camera" size={18}/><input type="file" className="hidden" onChange={handleImage}/></label></div>
-                    <Button className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-xl" onClick={handleSave}>Guardar Operación</Button>
+                    
+                    {/* INPUT IMAGEN CORREGIDO */}
+                    <div className="flex gap-3">
+                        <label className={`flex-1 p-3 border-2 border-dashed rounded-xl flex justify-center items-center gap-2 cursor-pointer transition-colors ${form.attachmentUrl?'border-emerald-500 bg-emerald-50 text-emerald-600':'border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`}>
+                            {isUploading ? <Icon name="Loader" className="animate-spin" size={18}/> : <Icon name={form.attachmentUrl?"Check":"Camera"} size={18}/>}
+                            <span>{isUploading ? 'Procesando...' : form.attachmentUrl ? 'Imagen Lista' : 'Adjuntar Comprobante'}</span>
+                            <input type="file" className="hidden" accept="image/*" onChange={handleImage} disabled={isUploading}/>
+                        </label>
+                    </div>
+                    
+                    <Button className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-xl" onClick={handleSave} disabled={isUploading}>Guardar Operación</Button>
                 </div>
             </Modal>
 
