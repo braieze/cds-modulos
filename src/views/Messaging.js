@@ -53,8 +53,8 @@ window.Views.Messaging = ({ userProfile }) => {
         hasLink: false,
 
         scheduledAt: '', 
-        eventDate: '',   
-        location: '', // NUEVO CAMPO UBICACIÓN
+        eventDate: '',    
+        location: '', 
         hasEvent: false
     };
     const [composeForm, setComposeForm] = useState(initialCompose);
@@ -277,7 +277,6 @@ window.Views.Messaging = ({ userProfile }) => {
             attachmentUrl: composeForm.attachmentUrl,
             attachmentType: composeForm.attachmentType || 'image',
             
-            // CORRECCIÓN: Guardar Link y Poll basado en el CHIP, no en el Tipo
             linkUrl: composeForm.hasLink ? composeForm.linkUrl : '',
             linkTitle: composeForm.hasLink ? composeForm.linkTitle : '',
             pollOptions: composeForm.hasPoll ? composeForm.pollOptions.map(o => ({ text: o, votes: [] })) : [],
@@ -286,7 +285,7 @@ window.Views.Messaging = ({ userProfile }) => {
             
             scheduledAt: composeForm.scheduledAt || null, 
             eventDate: composeForm.hasEvent ? composeForm.eventDate : null,
-            location: composeForm.hasEvent ? composeForm.location : '', // NUEVO
+            location: composeForm.hasEvent ? composeForm.location : '',
             
             readBy: [userProfile.id],
             replies: [],
@@ -297,18 +296,56 @@ window.Views.Messaging = ({ userProfile }) => {
 
         try {
             if (composeForm.id) {
+                // ... lógica de actualización existente ...
                 delete msgData.date; 
                 delete msgData.readBy;
                 delete msgData.replies;
                 delete msgData.reactions;
                 delete msgData.prayedBy;
                 delete msgData.reminders;
-
                 await window.db.collection('messages').doc(composeForm.id).update(msgData);
                 Utils.notify("Actualizado");
                 setSelectedBroadcastId(null);
             } else {
+                // --- NUEVO: ENVIAR NOTIFICACIÓN PUSH AL CREAR ---
                 await window.db.collection('messages').add(msgData);
+                
+                // 1. Calcular destinatarios para la Push
+                let targetTokens = [];
+                
+                // Filtramos a todos los miembros que tienen token y NO son el que envía
+                const potentialRecipients = members.filter(m => m.pushToken && m.id !== userProfile.id);
+
+                if (recipient === 'all') {
+                    targetTokens = potentialRecipients.map(m => m.pushToken);
+                } else if (recipient.startsWith('group:')) {
+                    const ministryName = recipient.split(':')[1];
+                    targetTokens = potentialRecipients
+                        .filter(m => m.ministry === ministryName || m.role === 'Pastor')
+                        .map(m => m.pushToken);
+                } else if (recipient.startsWith('custom:')) {
+                    const groupId = recipient.split(':')[1];
+                    const group = groups.find(g => g.id === groupId);
+                    if (group) {
+                        targetTokens = potentialRecipients
+                            .filter(m => group.members.includes(m.id))
+                            .map(m => m.pushToken);
+                    }
+                } else {
+                    // Mensaje directo
+                    targetTokens = potentialRecipients
+                        .filter(m => m.id === recipient)
+                        .map(m => m.pushToken);
+                }
+
+                // 2. Enviar si hay destinatarios y tenemos la lógica cargada
+                if (targetTokens.length > 0 && window.NotificationLogic?.sendPushNotification) {
+                    const pushTitle = finalCategory === 'General' ? 'Nuevo Mensaje' : finalCategory;
+                    const pushBody = composeForm.content; // Usamos el título del mensaje como cuerpo de la notificación
+                    
+                    window.NotificationLogic.sendPushNotification(targetTokens, pushTitle, pushBody);
+                }
+
                 Utils.notify("Enviado");
             }
             setIsComposeOpen(false);
@@ -474,6 +511,28 @@ window.Views.Messaging = ({ userProfile }) => {
         if (activeTab === 'direct') newMessage.to = selectedChat.otherId || selectedChat.id;
         try {
             await window.db.collection('messages').add(newMessage);
+            
+            // --- NUEVO: ENVIAR NOTIFICACIÓN RESPUESTA CHAT ---
+            // 1. Identificar destinatario
+            let targetTokens = [];
+            const otherId = activeTab === 'direct' ? (selectedChat.otherId || selectedChat.id) : null;
+            
+            if (otherId) {
+                // Es chat directo
+                const receiver = members.find(m => m.id === otherId);
+                if (receiver && receiver.pushToken) targetTokens = [receiver.pushToken];
+            } else {
+                // Es grupo o ministerio, notificar a todos MENOS al que envía
+                const recipients = getGroupMembers(selectedChat);
+                targetTokens = recipients
+                    .filter(m => m.id !== userProfile.id && m.pushToken)
+                    .map(m => m.pushToken);
+            }
+
+            if (targetTokens.length > 0 && window.NotificationLogic?.sendPushNotification) {
+                 window.NotificationLogic.sendPushNotification(targetTokens, userProfile.name, replyText);
+            }
+
             setReplyText("");
         } catch(e) { console.error(e); }
     };
