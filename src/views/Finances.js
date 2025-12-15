@@ -255,6 +255,15 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         }, 500);
     };
 
+    // Metas
+    const handleSaveGoal = () => {
+        const newGoals = { ...goals, [goalForm.category]: safeNum(goalForm.amount) };
+        setGoals(newGoals);
+        localStorage.setItem('finance_goals', JSON.stringify(newGoals));
+        setIsGoalModalOpen(false);
+        Utils.notify("Meta actualizada");
+    };
+
     // Render Helpers
     if (userProfile?.role !== 'Pastor') return <div className="h-full flex items-center justify-center text-slate-500">Acceso Restringido</div>;
     
