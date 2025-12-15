@@ -1,62 +1,108 @@
-// -------------------------------------------------------------------------
-// ESTE ARCHIVO DEBE IR EN LA RAÍZ (AL LADO DE INDEX.HTML)
-// NOMBRE OBLIGATORIO: firebase-messaging-sw.js
-// -------------------------------------------------------------------------
+window.NotificationLogic = {
+    // Tu clave real de Firebase Console (VAPID)
+    VAPID_KEY: "BHfJ1SQOqfljjMHYhfhYeEii6KSzooMUTIXDd5AT6g48qWj5l6uG5d6n-ZdyShPQM4xiAGM0kALUZwVQ-0an6KA", 
+    
+    // --- ¡ATENCIÓN! PEGA AQUÍ TU CLAVE DE SERVIDOR (EMPIEZA CON AAAA...) ---
+    // Ve a Firebase Console > Configuración > Cloud Messaging > Cloud Messaging API (Legacy)
+    // Si no está habilitada, habilítala en los 3 puntitos.
+    SERVER_KEY: "AIzaSyDDgNWktwBOYS1fnwGngHVRgWkhm-7QLMA", 
 
-importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
+    // Función para enviar la notificación real a los dispositivos
+    sendPushNotification: async (tokens, title, body) => {
+        if (!tokens || tokens.length === 0) return;
+        
+        // Limpiamos tokens duplicados y nulos
+        const uniqueTokens = [...new Set(tokens)].filter(t => t);
+        if (uniqueTokens.length === 0) return;
 
-// 1. Configuración de Firebase (Debe coincidir con la de index.html)
-firebase.initializeApp({
-    apiKey: "AIzaSyDXK_EcXsFGhRmXfkKG8SMdsM69c4PNfHw",
-    authDomain: "conquistadoresapp.firebaseapp.com",
-    projectId: "conquistadoresapp",
-    storageBucket: "conquistadoresapp.firebasestorage.app",
-    messagingSenderId: "518647225464",
-    appId: "1:518647225464:web:b3344ca5172498187e218d"
-});
+        console.log("Enviando push a", uniqueTokens.length, "dispositivos...");
 
-// 2. Inicializar Messaging en segundo plano
-const messaging = firebase.messaging();
+        try {
+            // Enviamos usando la API Legacy de FCM (la más fácil para usar desde el cliente)
+            const response = await fetch('https://fcm.googleapis.com/fcm/send', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `key=${window.NotificationLogic.SERVER_KEY}`
+                },
+                body: JSON.stringify({
+                    registration_ids: uniqueTokens,
+                    notification: {
+                        title: title,
+                        body: body,
+                        icon: '/icon-192.png', // Asegúrate de que este ícono exista
+                        click_action: '/'
+                    }
+                })
+            });
 
-// 3. Manejar notificaciones cuando la app está CERRADA o en 2do plano
-messaging.onBackgroundMessage((payload) => {
-  console.log('[firebase-messaging-sw.js] Notificación en 2do plano:', payload);
+            if (response.ok) {
+                console.log("Notificaciones enviadas con éxito.");
+            } else {
+                console.error("Error al enviar push:", await response.text());
+            }
+        } catch (error) {
+            console.error("Error de red al enviar push:", error);
+        }
+    },
 
-  const notificationTitle = payload.notification.title;
-  const notificationOptions = {
-    body: payload.notification.body,
-    icon: '/icon-192.png', // Asegúrate de tener este ícono o uno similar en tu carpeta
-    badge: '/icon-192.png',
-    // Opciones extra para móviles
-    vibrate: [100, 50, 100],
-    data: {
-        url: payload.data?.click_action || '/'
-    }
-  };
+    // --- Escuchar mensajes mientras la app está abierta ---
+    listenForMessages: () => {
+        try {
+            const messaging = firebase.messaging();
+            messaging.onMessage((payload) => {
+                console.log('Notificación recibida en primer plano:', payload);
+                const { title, body } = payload.notification || {};
+                window.Utils.notify(`🔔 ${title}: ${body}`, "brand");
+            });
+        } catch (e) {
+            console.log("Messaging no soportado o error al iniciar listener:", e);
+        }
+    },
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
-});
+    requestPermission: async (userProfile) => {
+        if (!('Notification' in window)) {
+            window.Utils.notify("Este dispositivo no soporta notificaciones.", "error");
+            return;
+        }
 
-// Listener para abrir la app al tocar la notificación
-self.addEventListener('notificationclick', function(event) {
-    console.log('[firebase-messaging-sw.js] Notificación clickeada.');
-    event.notification.close();
+        try {
+            const permission = await Notification.requestPermission();
+            
+            if (permission === 'granted') {
+                window.Utils.notify("Permiso concedido. Configurando...", "success");
+                const messaging = firebase.messaging();
+                const registration = await navigator.serviceWorker.ready;
 
-    // Intentar abrir la ventana
-    event.waitUntil(
-        clients.matchAll({type: 'window'}).then( windowClients => {
-            // Si ya está abierta, enfocarla
-            for (var i = 0; i < windowClients.length; i++) {
-                var client = windowClients[i];
-                if (client.url === '/' && 'focus' in client) {
-                    return client.focus();
+                const token = await messaging.getToken({ 
+                    vapidKey: window.NotificationLogic.VAPID_KEY,
+                    serviceWorkerRegistration: registration 
+                });
+
+                if (token) {
+                    window.NotificationLogic.listenForMessages();
+
+                    if (userProfile && userProfile.id) {
+                        await window.db.collection('members').doc(userProfile.id).update({
+                            pushToken: token,
+                            deviceType: /iPhone|iPad|iPod/.test(navigator.userAgent) ? 'iOS' : 'Android',
+                            updatedAt: new Date().toISOString()
+                        });
+                        window.Utils.notify("¡Notificaciones Activadas con Éxito!", "success");
+                    }
+                } else {
+                    window.Utils.notify("No se pudo obtener el token ID.", "error");
                 }
+            } else {
+                window.Utils.notify("Permiso denegado.", "error");
             }
-            // Si no, abrir una nueva
-            if (clients.openWindow) {
-                return clients.openWindow('/');
+        } catch (error) {
+            console.error("Error notificaciones detailed:", error);
+            if (error.code === 'messaging/failed-service-worker-registration') {
+                 window.Utils.notify("Error de configuración SW.", "error");
+            } else {
+                 window.Utils.notify("Error al activar: " + error.message, "error");
             }
-        })
-    );
-});
+        }
+    }
+};
