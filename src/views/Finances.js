@@ -26,23 +26,32 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
     const [errorPin, setErrorPin] = useState(false);
 
     // Formularios
-    const initialForm = { type: 'Culto', date: Utils.getLocalDate(), tithesCash: '', tithesTransfer: '', offeringsCash: '', offeringsTransfer: '', amount: '', category: 'General', method: 'Efectivo', notes: '', attachmentUrl: '' };
+    // Agregamos fields para allocation (destinar a meta) y recurring (fijo)
+    const initialForm = { 
+        type: 'Culto', date: Utils.getLocalDate(), 
+        tithesCash: '', tithesTransfer: '', offeringsCash: '', offeringsTransfer: '', 
+        amount: '', category: 'General', method: 'Efectivo', notes: '', attachmentUrl: '',
+        isRecurring: false, allocateToGoalId: '', allocationAmount: ''
+    };
     const [form, setForm] = useState(initialForm);
 
-    // Metas (Persistencia Local)
-    const [goals, setGoals] = useState(() => JSON.parse(localStorage.getItem('finance_goals_v2')) || []);
+    // Metas (Persistencia Local v3 para soportar acumulado manual)
+    const [goals, setGoals] = useState(() => JSON.parse(localStorage.getItem('finance_goals_v3')) || []);
     const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
-    // Goal Form: type='saving' (Ingreso/Recaudación) | 'spending' (Límite Gasto)
-    const [goalForm, setGoalForm] = useState({ id: null, category: '', amount: '', type: 'spending', label: '' });
+    const [goalForm, setGoalForm] = useState({ id: null, category: '', amount: '', type: 'spending', label: '', currentSaved: 0 });
 
-    // Referencias PDF y Gráficos
+    // Referencias Gráficos
     const printRef = useRef(null);
     const [pdfData, setPdfData] = useState(null);
-    const lineChartRef = useRef(null);
-    const pieChartRef = useRef(null);
+    // Chart Refs
+    const chartRefs = {
+        projection: useRef(null),
+        breakdown: useRef(null),
+        daily: useRef(null),
+        trend: useRef(null)
+    };
     const chartInstances = useRef({});
 
-    // Categorías Extendidas
     const categories = [
         { value: 'General', label: 'General / Varios', icon: 'Info', color: '#94a3b8' },
         { value: 'Mantenimiento', label: 'Infraestructura', icon: 'Briefcase', color: '#f59e0b' },
@@ -55,11 +64,11 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         { value: 'Ofrendas', label: 'Ofrendas (Ingreso)', icon: 'Gift', color: '#8b5cf6' }
     ];
 
-    // --- HELPERS ---
+    // --- HELPERS & CALCULOS ---
     const safeNum = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
     const blurClass = showBalance ? '' : 'filter blur-md select-none transition-all duration-500';
 
-    // --- DATA PROCESSING ---
+    // 1. Datos Mensuales
     const monthlyData = useMemo(() => {
         if (!finances) return [];
         const m = currentDate.toISOString().slice(0, 7);
@@ -68,16 +77,17 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
             .filter(f => {
                 if (searchTerm) {
                     const term = searchTerm.toLowerCase();
-                    const matches = (f.category||'').toLowerCase().includes(term) || (f.notes||'').toLowerCase().includes(term);
-                    if (!matches) return false;
+                    return (f.category||'').toLowerCase().includes(term) || (f.notes||'').toLowerCase().includes(term);
                 }
                 if (filterType === 'income') return safeNum(f.total || f.amount) > 0;
                 if (filterType === 'expense') return safeNum(f.total || f.amount) < 0;
+                if (filterType === 'recurring') return f.isRecurring === true;
                 return true;
             })
             .sort((a,b) => new Date(b.date) - new Date(a.date));
     }, [finances, currentDate, searchTerm, filterType]);
 
+    // 2. Totales Mensuales
     const monthTotals = useMemo(() => {
         let incomes = 0, expenses = 0;
         monthlyData.forEach(f => {
@@ -87,206 +97,285 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
         return { incomes, expenses, net: incomes - expenses };
     }, [monthlyData]);
 
-    const chartData = useMemo(() => {
-        if (!finances) return { trend: [], pie: [] };
-        const trendMap = {};
-        for(let i=5; i>=0; i--) { 
-            const d = new Date(currentDate); d.setMonth(d.getMonth() - i); 
-            const k = d.toISOString().slice(0,7);
-            trendMap[k] = { name: k, label: Utils.formatDate(d.toISOString().slice(0,10), 'month'), ingresos: 0, gastos: 0 }; 
+    // 3. Saldos Globales Reales (Histórico Completo)
+    const globalBalances = useMemo(() => {
+        let cash = 0, bank = 0;
+        if (finances) {
+            finances.forEach(f => {
+                let val = 0;
+                if (f.type === 'Culto') {
+                    cash += safeNum(f.tithesCash)+safeNum(f.offeringsCash);
+                    bank += safeNum(f.tithesTransfer)+safeNum(f.offeringsTransfer);
+                } else {
+                    val = safeNum(f.amount);
+                    if (f.method === 'Banco') bank += val; else cash += val;
+                }
+            });
         }
-        finances.forEach(f => {
-            if(!f.date) return;
-            const k = f.date.slice(0, 7);
-            if (trendMap[k]) {
-                const val = safeNum(f.total || f.amount);
-                if (val > 0) trendMap[k].ingresos += val;
-                else trendMap[k].gastos += Math.abs(val);
-            }
-        });
+        return { cash, bank, total: cash + bank };
+    }, [finances]);
+
+    // 4. Datos para Gráficos
+    const chartData = useMemo(() => {
+        if (!finances) return null;
+        
+        // A. Breakdown (Torta) - Solo Gastos Mes Actual
         const pieMap = {};
-        const currentM = currentDate.toISOString().slice(0,7);
-        finances.filter(f => f.date.startsWith(currentM) && safeNum(f.total||f.amount) < 0).forEach(f => {
+        monthlyData.filter(f => safeNum(f.total||f.amount) < 0).forEach(f => {
             const c = f.category || 'General';
             pieMap[c] = (pieMap[c] || 0) + Math.abs(safeNum(f.total||f.amount));
         });
+
+        // B. Daily (Barras) - Ingresos vs Gastos por día
+        const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+        const dailyLabels = Array.from({length: daysInMonth}, (_, i) => i + 1);
+        const dailyIncome = new Array(daysInMonth).fill(0);
+        const dailyExpense = new Array(daysInMonth).fill(0);
+        
+        monthlyData.forEach(f => {
+            const d = parseInt(f.date.slice(8, 10)) - 1;
+            const val = safeNum(f.total || f.amount);
+            if(d >= 0 && d < daysInMonth) {
+                if(val > 0) dailyIncome[d] += val;
+                else dailyExpense[d] += Math.abs(val);
+            }
+        });
+
+        // C. Projection (Lineal) - Acumulado del mes + Proyección
+        const cumulative = [];
+        let runningTotal = 0;
+        // Orden ascendente para el gráfico
+        const sortedMonth = [...monthlyData].sort((a,b) => new Date(a.date) - new Date(b.date));
+        sortedMonth.forEach(f => {
+             runningTotal += safeNum(f.total || f.amount);
+             cumulative.push(runningTotal);
+        });
+        // Proyección simple: promedio diario * días restantes
+        const today = new Date();
+        const isCurrentMonth = today.getMonth() === currentDate.getMonth() && today.getFullYear() === currentDate.getFullYear();
+        let projection = null;
+        if (isCurrentMonth && cumulative.length > 0) {
+            const daysPassed = today.getDate();
+            const avgDaily = runningTotal / daysPassed;
+            const projectedEnd = runningTotal + (avgDaily * (daysInMonth - daysPassed));
+            projection = { current: runningTotal, end: projectedEnd };
+        }
+
         return { 
-            trend: Object.values(trendMap).sort((a,b) => a.name.localeCompare(b.name)), 
-            pie: Object.entries(pieMap).map(([n,v]) => ({ name: n, value: v })).sort((a,b) => b.value - a.value)
+            pie: { labels: Object.keys(pieMap), data: Object.values(pieMap) },
+            daily: { labels: dailyLabels, income: dailyIncome, expense: dailyExpense },
+            projection
         };
     }, [monthlyData, currentDate, finances]);
 
-    // --- CHARTS ---
+    // --- CHARTS EFFECTS ---
     useEffect(() => {
         const Chart = window.Chart;
-        if (tabView !== 'dashboard' || !Chart) return;
-        Chart.defaults.color = '#94a3b8'; Chart.defaults.borderColor = 'rgba(255,255,255,0.05)';
-        Object.values(chartInstances.current).forEach(c => c.destroy());
+        if ((tabView !== 'stats' && tabView !== 'dashboard') || !Chart || !chartData) return;
+        
+        Chart.defaults.color = '#94a3b8'; 
+        Chart.defaults.borderColor = 'rgba(255,255,255,0.05)';
+        
+        // Limpiar instancias previas
+        Object.values(chartInstances.current).forEach(c => c && c.destroy());
 
-        if (lineChartRef.current) {
-            const gradientStroke = lineChartRef.current.getContext('2d').createLinearGradient(0, 0, 0, 400);
-            gradientStroke.addColorStop(0, '#818cf8'); gradientStroke.addColorStop(1, '#c084fc');
+        // 1. Projection Chart (En Tab Stats)
+        if (chartRefs.projection.current && tabView === 'stats') {
+            const ctx = chartRefs.projection.current.getContext('2d');
+            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+            gradient.addColorStop(0, 'rgba(99, 102, 241, 0.5)'); // Indigo
+            gradient.addColorStop(1, 'rgba(99, 102, 241, 0.0)');
 
-            chartInstances.current.line = new Chart(lineChartRef.current, {
+            const dataPoints = chartData.daily.income.map((inc, i) => inc - chartData.daily.expense[i]); // Net daily roughly
+            // Simplificado para proyección: Usamos una línea recta desde 0 hasta el total actual
+            
+            chartInstances.current.projection = new Chart(chartRefs.projection.current, {
                 type: 'line',
                 data: {
-                    labels: chartData.trend.map(d => d.label),
-                    datasets: [
-                        { label: 'Neto', data: chartData.trend.map(d => d.ingresos - d.gastos), borderColor: '#c084fc', backgroundColor: 'rgba(192, 132, 252, 0.1)', fill: true, tension: 0.4, pointBackgroundColor: '#fff', pointBorderColor: '#c084fc' }
-                    ]
+                    labels: ['Inicio', 'Hoy', 'Fin de Mes (Est.)'],
+                    datasets: [{
+                        label: 'Balance Proyectado',
+                        data: [0, monthTotals.net, chartData.projection ? chartData.projection.end : monthTotals.net],
+                        borderColor: '#818cf8',
+                        borderDash: [5, 5],
+                        fill: true,
+                        backgroundColor: gradient,
+                        tension: 0.4
+                    }]
                 },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { display: false } } }
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
             });
         }
-        return () => Object.values(chartInstances.current).forEach(c => c.destroy());
-    }, [chartData, tabView]);
 
-    // --- ACTIONS ---
+        // 2. Breakdown Pie (En Tab Stats)
+        if (chartRefs.breakdown.current && tabView === 'stats') {
+            chartInstances.current.breakdown = new Chart(chartRefs.breakdown.current, {
+                type: 'doughnut',
+                data: {
+                    labels: chartData.pie.labels,
+                    datasets: [{
+                        data: chartData.pie.data,
+                        backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1'],
+                        borderWidth: 0,
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'right', labels: { boxWidth: 10 } } } }
+            });
+        }
+
+        // 3. Daily Bars (En Dashboard o Stats)
+        const dailyRef = tabView === 'dashboard' ? chartRefs.trend : chartRefs.daily; // Reutilizamos ref para dashboard
+        if (dailyRef && dailyRef.current) {
+            chartInstances.current.daily = new Chart(dailyRef.current, {
+                type: 'bar',
+                data: {
+                    labels: chartData.daily.labels,
+                    datasets: [
+                        { label: 'Ingreso', data: chartData.daily.income, backgroundColor: '#10b981', borderRadius: 4 },
+                        { label: 'Gasto', data: chartData.daily.expense, backgroundColor: '#f43f5e', borderRadius: 4 }
+                    ]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, display: false } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        return () => Object.values(chartInstances.current).forEach(c => c && c.destroy());
+    }, [chartData, tabView, monthTotals]);
+
+
+    // --- ACCIONES ---
     const handleUnlock = (e) => { e.preventDefault(); if (pinInput === '1234') { setIsLocked(false); setErrorPin(false); } else { setErrorPin(true); setPinInput(''); } };
-    
     const toggleSelect = (id) => { if (selectedIds.includes(id)) setSelectedIds(prev => prev.filter(i => i !== id)); else setSelectedIds(prev => [...prev, id]); };
     const selectAll = () => { if (selectedIds.length === monthlyData.length) setSelectedIds([]); else setSelectedIds(monthlyData.map(d => d.id)); };
     
     const handleBulkDelete = async () => {
-        if(!confirm(`¿ELIMINAR ${selectedIds.length} ELEMENTOS? Esta acción no se puede deshacer.`)) return;
+        if(!confirm(`¿ELIMINAR ${selectedIds.length} ELEMENTOS?`)) return;
         const batch = window.db.batch();
         selectedIds.forEach(id => batch.delete(window.db.collection('finances').doc(id)));
         await batch.commit();
         setSelectedIds([]);
-        Utils.notify("Elementos eliminados exitosamente");
+        Utils.notify("Eliminados correctamente");
     };
 
     const handleSave = () => { 
         let f = {...form, createdAt: new Date().toISOString() };
+        
+        // Validación y Calculo de Totales
         if(form.type==='Culto') {
             const t = safeNum(form.tithesCash)+safeNum(form.tithesTransfer)+safeNum(form.offeringsCash)+safeNum(form.offeringsTransfer);
-            if(t===0) return Utils.notify("El total no puede ser 0", "error");
+            if(t===0) return Utils.notify("Total 0 no permitido", "error");
             f.total = t; f.category = 'Culto';
         } else {
-            const a = safeNum(form.amount); if(a===0) return Utils.notify("Ingrese un monto válido", "error");
+            const a = safeNum(form.amount); if(a===0) return Utils.notify("Monto requerido", "error");
             const v = Math.abs(a); f.amount = form.type==='Gasto'?-v:v; f.total = f.amount;
         }
-        addData('finances', f); setIsModalOpen(false); setForm(initialForm); Utils.notify("Movimiento registrado");
+
+        // Lógica de Asignación a Meta (Sobres)
+        if ((form.type === 'Ingreso' || form.type === 'Culto') && form.allocateToGoalId && safeNum(form.allocationAmount) > 0) {
+            const goalId = form.allocateToGoalId;
+            const allocAmount = safeNum(form.allocationAmount);
+            // Actualizar Meta Localmente
+            const updatedGoals = goals.map(g => {
+                if (g.id === goalId) {
+                    return { ...g, currentSaved: (g.currentSaved || 0) + allocAmount };
+                }
+                return g;
+            });
+            setGoals(updatedGoals);
+            localStorage.setItem('finance_goals_v3', JSON.stringify(updatedGoals));
+            f.notes = (f.notes || '') + ` [Asignado $${allocAmount} a Meta]`;
+        }
+
+        addData('finances', f); 
+        setIsModalOpen(false); 
+        setForm(initialForm); 
+        Utils.notify("Registrado con éxito");
     };
 
-    const handleImage = async (e) => { const f=e.target.files[0]; if(!f)return; setIsUploading(true); try{const b=await compressImage(f); setForm(p=>({...p, attachmentUrl:b}));}catch(err){Utils.notify("Error subida","error");} setIsUploading(false); };
-
-    // --- EXPORTAR A CSV (Recuperado) ---
+    // --- PDF & CSV ---
     const handleExportCSV = () => {
-        const headers = ["ID", "Fecha", "Tipo", "Categoría", "Detalle", "Monto", "Método", "Nota"];
+        const headers = ["ID", "Fecha", "Tipo", "Categoría", "Monto", "Método", "Nota"];
         const rows = monthlyData.map(f => [
-            f.id,
-            f.date,
-            f.type,
-            f.category || 'Culto',
-            `"${(f.notes || '').replace(/"/g, '""')}"`,
-            safeNum(f.total || f.amount),
-            f.method,
-            `"${(f.notes || '').replace(/"/g, '""')}"`
+            f.id, f.date, f.type, f.category || 'Culto', safeNum(f.total || f.amount), f.method, `"${(f.notes || '').replace(/"/g, '""')}"`
         ]);
         const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute("download", `Movimientos_${currentDate.toISOString().slice(0,7)}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const link = document.createElement("a"); link.setAttribute("href", encodeURI(csvContent)); link.setAttribute("download", `Reporte_${currentDate.toISOString().slice(0,7)}.csv`);
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
     };
 
-    // --- EXPORTAR A PDF (Recuperado) ---
     const handleExportPDF = (item) => {
         setPdfData(item);
         setTimeout(async () => {
-            const el = printRef.current;
-            el.style.display = 'block';
-            if (window.html2pdf) {
-                await window.html2pdf().set({ 
-                    margin:0, 
-                    filename:`Comprobante_${item.id.slice(0,6)}.pdf`, 
-                    image:{type:'jpeg',quality:0.98}, 
-                    html2canvas:{scale:3, useCORS: true}, 
-                    jsPDF:{unit:'mm',format:[100,150], orientation: 'portrait'} 
-                }).from(el).save();
-            } else {
-                alert("Librería PDF no cargada aún. Intente de nuevo.");
-            }
+            const el = printRef.current; el.style.display = 'block';
+            if (window.html2pdf) await window.html2pdf().set({ margin:0, filename:`Recibo.pdf`, image:{type:'jpeg',quality:0.98}, html2canvas:{scale:3, useCORS:true}, jsPDF:{unit:'mm',format:[100,150]} }).from(el).save();
             el.style.display = 'none';
         }, 500);
     };
 
-    // --- METAS LOGIC ---
+    // --- METAS ---
     const handleSaveGoal = () => {
         let newGoals;
-        if (goalForm.id) { // Edit
-            newGoals = goals.map(g => g.id === goalForm.id ? { ...g, ...goalForm, id: goalForm.id } : g);
-        } else { // Create
-            newGoals = [...goals, { ...goalForm, id: Date.now().toString() }];
-        }
+        const gData = { ...goalForm, currentSaved: safeNum(goalForm.currentSaved) };
+        if (goalForm.id) newGoals = goals.map(g => g.id === goalForm.id ? { ...g, ...gData, id: goalForm.id } : g);
+        else newGoals = [...goals, { ...gData, id: Date.now().toString() }];
         setGoals(newGoals);
-        localStorage.setItem('finance_goals_v2', JSON.stringify(newGoals));
+        localStorage.setItem('finance_goals_v3', JSON.stringify(newGoals));
         setIsGoalModalOpen(false);
-        Utils.notify("Meta guardada");
     };
-
+    
     const handleDeleteGoal = (id) => {
-        if(!confirm("¿Borrar esta meta?")) return;
+        if(!confirm("¿Borrar meta?")) return;
         const newGoals = goals.filter(g => g.id !== id);
         setGoals(newGoals);
-        localStorage.setItem('finance_goals_v2', JSON.stringify(newGoals));
-        setIsGoalModalOpen(false); // Cierra el modal si estaba abierto
-    };
-
-    const openGoalModal = (goal = null) => {
-        if (goal) setGoalForm(goal);
-        else setGoalForm({ id: null, category: '', amount: '', type: 'spending', label: '' });
-        setIsGoalModalOpen(true);
+        localStorage.setItem('finance_goals_v3', JSON.stringify(newGoals));
+        setIsGoalModalOpen(false);
     };
 
     const getGoalProgress = (goal) => {
         const target = safeNum(goal.amount);
         let current = 0;
         
-        monthlyData.forEach(f => {
-            const val = safeNum(f.total || f.amount);
-            // Gasto: suma negativos
-            if (goal.type === 'spending' && val < 0 && (f.category === goal.category || (goal.category === 'Culto' && f.type === 'Culto'))) {
-                current += Math.abs(val);
-            }
-            // Ahorro: suma positivos
-            if (goal.type === 'saving' && val > 0 && (f.category === goal.category || (goal.category === 'Culto' && f.type === 'Culto'))) {
-                current += val;
-            }
-        });
-
+        if (goal.type === 'saving') {
+            // Para ahorro, usamos el valor acumulado manualmente ("Sobre")
+            current = safeNum(goal.currentSaved);
+        } else {
+            // Para gasto, sumamos los gastos reales del mes
+            monthlyData.forEach(f => {
+                const val = safeNum(f.total || f.amount);
+                if (val < 0 && (f.category === goal.category || (goal.category === 'Culto' && f.type === 'Culto'))) {
+                    current += Math.abs(val);
+                }
+            });
+        }
         const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
         return { current, target, pct };
     };
+    
+    // Calcular "Dinero en Sobres" vs "Dinero Libre"
+    const totalAllocated = goals.filter(g => g.type === 'saving').reduce((acc, g) => acc + safeNum(g.currentSaved), 0);
+    const freeBalance = globalBalances.total - totalAllocated;
 
     // --- RENDER ---
     if (userProfile?.role !== 'Pastor') return <div className="h-full flex items-center justify-center text-slate-500">Acceso Restringido</div>;
     
     if (isLocked) return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050511] animate-enter bg-[url('https://grainy-gradients.vercel.app/noise.svg')]">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050511] animate-enter">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/40 via-purple-900/20 to-black pointer-events-none"></div>
             <div className="relative bg-white/5 backdrop-blur-2xl p-8 rounded-[32px] shadow-2xl border border-white/10 max-w-sm w-full text-center">
-                <div className="bg-gradient-to-tr from-indigo-500 to-purple-600 w-20 h-20 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-[0_0_40px_rgba(139,92,246,0.5)]">
-                    <Icon name="Lock" size={32}/>
-                </div>
-                <h2 className="text-3xl font-black text-white mb-2 tracking-tight">Bienvenido</h2>
-                <p className="text-slate-400 mb-8">Tesorería Digital</p>
+                <div className="bg-indigo-500 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-lg shadow-indigo-500/50"><Icon name="Lock" size={28}/></div>
+                <h2 className="text-2xl font-black text-white mb-6">Finanzas</h2>
                 <form onSubmit={handleUnlock}>
-                    <div className="flex justify-center gap-4 mb-8">
-                        {[0,1,2,3].map(i => (
-                            <div key={i} className={`w-3 h-3 rounded-full transition-all duration-300 ${pinInput.length > i ? 'bg-indigo-400 scale-125 shadow-[0_0_10px_#818cf8]' : 'bg-white/10'}`}></div>
-                        ))}
-                    </div>
-                    <input type="password" maxLength="4" autoFocus className="opacity-0 absolute top-0 left-0 h-full w-full cursor-default" value={pinInput} onChange={e=>setPinInput(e.target.value)} inputMode="numeric" />
-                    <div className="grid grid-cols-3 gap-4">
-                        {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} type="button" onClick={()=>setPinInput(p=> (p+n).slice(0,4))} className="h-16 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-bold text-2xl transition-all border border-white/5 active:scale-95">{n}</button>)}
+                    <input type="password" maxLength="4" autoFocus className="opacity-0 absolute" value={pinInput} onChange={e=>setPinInput(e.target.value)} />
+                    <div className="grid grid-cols-3 gap-3">
+                        {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} type="button" onClick={()=>setPinInput(p=> (p+n).slice(0,4))} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl border border-white/5">{n}</button>)}
                         <div/>
-                        <button type="button" onClick={()=>setPinInput(p=> (p+0).slice(0,4))} className="h-16 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-bold text-2xl transition-all border border-white/5 active:scale-95">0</button>
-                        <button type="button" onClick={()=>setPinInput(p=>p.slice(0,-1))} className="h-16 rounded-2xl bg-red-500/10 hover:bg-red-500/20 text-red-400 flex items-center justify-center border border-red-500/10 active:scale-95"><Icon name="Delete" size={24}/></button>
+                        <button type="button" onClick={()=>setPinInput(p=> (p+0).slice(0,4))} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl border border-white/5">0</button>
+                        <button type="button" onClick={()=>setPinInput(p=>p.slice(0,-1))} className="h-14 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center border border-red-500/10"><Icon name="Delete" size={20}/></button>
                     </div>
                 </form>
             </div>
@@ -295,103 +384,130 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
 
     return (
         <div className="min-h-screen bg-[#020617] text-slate-200 font-sans -m-4 sm:-m-8 pb-32 relative overflow-hidden selection:bg-indigo-500/30">
-            {/* Background Effects */}
-            <div className="fixed top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-900/20 blur-[120px] pointer-events-none"></div>
-            <div className="fixed bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-purple-900/20 blur-[120px] pointer-events-none"></div>
-            
-            <div className="relative z-10 p-4 sm:p-8">
+            {/* Ambient Background */}
+            <div className="fixed top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-indigo-600/10 blur-[150px] pointer-events-none"></div>
+            <div className="fixed bottom-[-20%] right-[-10%] w-[60%] h-[60%] rounded-full bg-purple-600/10 blur-[150px] pointer-events-none"></div>
+
+            <div className="relative z-10 p-4 sm:p-8 max-w-7xl mx-auto">
                 {/* HEADER */}
-                <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 mb-10">
-                    <div className="flex items-center gap-5">
-                        <div className="relative">
-                            <div className="absolute inset-0 bg-indigo-500 blur-lg opacity-40 animate-pulse"></div>
-                            <div className="relative bg-gradient-to-br from-indigo-500 to-purple-600 p-3 rounded-2xl text-white shadow-xl">
-                                <Icon name="Wallet" size={28}/>
-                            </div>
-                        </div>
+                <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 mb-8">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-gradient-to-tr from-indigo-500 to-purple-600 p-3 rounded-2xl text-white shadow-xl shadow-indigo-500/20"><Icon name="Wallet" size={24}/></div>
                         <div>
-                            <h2 className="text-3xl font-black text-white tracking-tight">Finanzas</h2>
-                            <p className="text-slate-400 font-medium">Panel de Control</p>
+                            <h2 className="text-2xl font-black text-white tracking-tight">Panel Financiero</h2>
+                            <p className="text-slate-400 text-sm font-medium">Gestión Integral</p>
                         </div>
-                        <button onClick={()=>setShowBalance(!showBalance)} className="ml-2 p-2 rounded-full hover:bg-white/5 text-slate-500 hover:text-white transition-colors">
-                            <Icon name={showBalance?"Eye":"EyeOff"} size={20}/>
-                        </button>
+                        <button onClick={()=>setShowBalance(!showBalance)} className="ml-2 p-2 rounded-full hover:bg-white/5 text-slate-500 hover:text-white transition-colors"><Icon name={showBalance?"Eye":"EyeOff"} size={18}/></button>
                     </div>
                     
-                    <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto bg-white/5 p-1.5 rounded-2xl border border-white/10 backdrop-blur-md">
-                        <div className="text-slate-300 [&>select]:bg-transparent [&>select]:text-white [&>select]:border-none [&>select]:font-bold [&>select]:outline-none px-2">
-                            <DateFilter currentDate={currentDate} onChange={setCurrentDate} />
-                        </div>
+                    <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto bg-white/5 p-1.5 rounded-2xl border border-white/10 backdrop-blur-md">
+                        <div className="text-slate-300 [&>select]:bg-transparent [&>select]:text-white [&>select]:border-none [&>select]:font-bold [&>select]:outline-none px-2"><DateFilter currentDate={currentDate} onChange={setCurrentDate} /></div>
                         <div className="w-px h-6 bg-white/10 mx-1"></div>
-                        {['dashboard','list','goals'].map(t => (
+                        {['dashboard','stats','list','goals'].map(t => (
                             <button key={t} onClick={()=>setTabView(t)} 
-                                className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all relative overflow-hidden ${tabView===t?'text-white shadow-lg':'text-slate-400 hover:text-white hover:bg-white/5'}`}>
-                                {tabView===t && <div className="absolute inset-0 bg-gradient-to-r from-indigo-600 to-purple-600 opacity-100"></div>}
-                                <span className="relative z-10 capitalize">{t === 'dashboard' ? 'Resumen' : t === 'list' ? 'Movimientos' : 'Metas'}</span>
+                                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all relative overflow-hidden ${tabView===t?'text-white shadow-lg':'text-slate-400 hover:text-white hover:bg-white/5'}`}>
+                                {tabView===t && <div className="absolute inset-0 bg-indigo-600 opacity-80"></div>}
+                                <span className="relative z-10 capitalize">{t === 'dashboard' ? 'Resumen' : t === 'stats' ? 'Gráficos' : t === 'list' ? 'Movimientos' : 'Metas'}</span>
                             </button>
                         ))}
-                        <div className="w-px h-6 bg-white/10 mx-1"></div>
-                        <button onClick={()=>{setForm({...initialForm, date: Utils.getLocalDate()}); setIsModalOpen(true)}} 
-                            className="bg-white text-indigo-950 p-2.5 rounded-xl hover:bg-indigo-50 transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)] active:scale-95">
-                            <Icon name="Plus" size={20}/>
-                        </button>
+                        <button onClick={()=>{setForm({...initialForm, date: Utils.getLocalDate()}); setIsModalOpen(true)}} className="bg-white text-indigo-950 p-2 rounded-xl hover:bg-indigo-50 transition-all shadow-[0_0_15px_rgba(255,255,255,0.2)] active:scale-95 ml-1"><Icon name="Plus" size={18}/></button>
                     </div>
                 </div>
 
-                {/* DASHBOARD CONTENT */}
+                {/* DASHBOARD */}
                 {tabView === 'dashboard' && (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-enter">
-                        {/* Main Balance Card - Bento Style */}
-                        <div className="lg:col-span-2 bg-gradient-to-br from-indigo-600 to-purple-800 rounded-[32px] p-8 text-white relative overflow-hidden shadow-2xl shadow-indigo-900/40 border border-white/10">
-                            <div className="absolute top-0 right-0 p-32 bg-white/10 rounded-full blur-3xl -mr-16 -mt-16 mix-blend-overlay"></div>
-                            <div className="relative z-10 flex flex-col justify-between h-full min-h-[220px]">
-                                <div className="flex justify-between items-start">
-                                    <div className="bg-black/20 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/10 text-xs font-bold uppercase tracking-wider text-indigo-100">Balance Total</div>
-                                    <Icon name="Activity" className="opacity-50"/>
-                                </div>
-                                <div>
-                                    <h3 className={`text-5xl md:text-6xl font-black tracking-tight mb-2 ${blurClass}`}>
-                                        {showBalance ? formatCurrency(monthTotals.net) : '$ •••••••'}
-                                    </h3>
-                                    <div className={`flex items-center gap-4 text-indigo-100 font-medium ${blurClass}`}>
-                                        <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]"></div> Neto Mes</div>
+                        {/* 1. Main Balance Card (Restaurada Full) */}
+                        <div className="lg:col-span-2 bg-gradient-to-br from-indigo-900 to-[#0f172a] rounded-[32px] p-8 relative overflow-hidden shadow-2xl border border-white/10 group">
+                            <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl -mr-16 -mt-16 group-hover:bg-indigo-500/30 transition-all duration-700"></div>
+                            
+                            <div className="relative z-10">
+                                <span className="text-indigo-200 text-xs font-bold uppercase tracking-widest border border-indigo-500/30 px-3 py-1 rounded-full bg-indigo-500/10">Balance Total</span>
+                                <h3 className={`text-5xl sm:text-6xl font-black text-white mt-4 mb-2 tracking-tight ${blurClass}`}>{showBalance ? formatCurrency(globalBalances.total) : '$ •••••••'}</h3>
+                                <p className="text-slate-400 text-sm mb-8">Saldo acumulado disponible</p>
+
+                                {/* Desglose Efectivo vs Banco */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-white/5 p-4 rounded-2xl border border-white/5 backdrop-blur-sm hover:bg-white/10 transition-colors">
+                                        <div className="flex items-center gap-2 mb-2 text-emerald-400">
+                                            <Icon name="DollarSign" size={16}/> <span className="text-xs font-bold uppercase">Efectivo (Caja)</span>
+                                        </div>
+                                        <span className={`text-xl font-bold text-white ${blurClass}`}>{showBalance ? formatCurrency(globalBalances.cash) : '••••'}</span>
+                                    </div>
+                                    <div className="bg-white/5 p-4 rounded-2xl border border-white/5 backdrop-blur-sm hover:bg-white/10 transition-colors">
+                                        <div className="flex items-center gap-2 mb-2 text-blue-400">
+                                            <Icon name="CreditCard" size={16}/> <span className="text-xs font-bold uppercase">Banco / Digital</span>
+                                        </div>
+                                        <span className={`text-xl font-bold text-white ${blurClass}`}>{showBalance ? formatCurrency(globalBalances.bank) : '••••'}</span>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Mini Cards Stack */}
-                        <div className="grid grid-rows-2 gap-6">
-                            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-[32px] p-6 flex flex-col justify-center relative overflow-hidden group">
-                                <div className="absolute right-[-20px] top-[-20px] bg-emerald-500/20 w-32 h-32 rounded-full blur-2xl group-hover:bg-emerald-500/30 transition-all"></div>
-                                <div className="relative z-10">
-                                    <div className="flex items-center gap-3 mb-2 text-emerald-400">
-                                        <div className="p-2 bg-emerald-500/20 rounded-lg"><Icon name="ArrowUp" size={18}/></div>
-                                        <span className="font-bold text-sm uppercase">Ingresos</span>
+                        {/* 2. Monthly Summary Bars */}
+                        <div className="flex flex-col gap-4">
+                            <div className="flex-1 bg-[#1e293b]/50 backdrop-blur-md border border-white/10 rounded-[32px] p-6 relative overflow-hidden">
+                                <div className="absolute right-0 top-0 w-20 h-full bg-emerald-500/10 skew-x-12"></div>
+                                <div className="flex justify-between items-end relative z-10">
+                                    <div>
+                                        <span className="text-emerald-400 text-xs font-bold uppercase block mb-1">Ingresos (Mes)</span>
+                                        <span className={`text-2xl font-black text-white ${blurClass}`}>{showBalance ? formatCurrency(monthTotals.incomes) : '••••'}</span>
                                     </div>
-                                    <span className={`text-3xl font-black text-white ${blurClass}`}>{showBalance ? formatCurrency(monthTotals.incomes) : '••••'}</span>
+                                    <div className="p-3 bg-emerald-500/20 rounded-xl text-emerald-400"><Icon name="ArrowUp" size={20}/></div>
+                                </div>
+                                <div className="mt-4 w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                                    <div className="h-full bg-emerald-500 shadow-[0_0_10px_#10b981]" style={{width: '70%'}}></div>
                                 </div>
                             </div>
-                            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-[32px] p-6 flex flex-col justify-center relative overflow-hidden group">
-                                <div className="absolute right-[-20px] bottom-[-20px] bg-rose-500/20 w-32 h-32 rounded-full blur-2xl group-hover:bg-rose-500/30 transition-all"></div>
-                                <div className="relative z-10">
-                                    <div className="flex items-center gap-3 mb-2 text-rose-400">
-                                        <div className="p-2 bg-rose-500/20 rounded-lg"><Icon name="ArrowDown" size={18}/></div>
-                                        <span className="font-bold text-sm uppercase">Gastos</span>
+
+                            <div className="flex-1 bg-[#1e293b]/50 backdrop-blur-md border border-white/10 rounded-[32px] p-6 relative overflow-hidden">
+                                <div className="absolute right-0 top-0 w-20 h-full bg-rose-500/10 skew-x-12"></div>
+                                <div className="flex justify-between items-end relative z-10">
+                                    <div>
+                                        <span className="text-rose-400 text-xs font-bold uppercase block mb-1">Gastos (Mes)</span>
+                                        <span className={`text-2xl font-black text-white ${blurClass}`}>{showBalance ? formatCurrency(monthTotals.expenses) : '••••'}</span>
                                     </div>
-                                    <span className={`text-3xl font-black text-white ${blurClass}`}>{showBalance ? formatCurrency(monthTotals.expenses) : '••••'}</span>
+                                    <div className="p-3 bg-rose-500/20 rounded-xl text-rose-400"><Icon name="ArrowDown" size={20}/></div>
+                                </div>
+                                <div className="mt-4 w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                                    <div className="h-full bg-rose-500 shadow-[0_0_10px_#f43f5e]" style={{width: '40%'}}></div>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Chart Area */}
-                        <div className="lg:col-span-3 bg-[#0f172a]/50 backdrop-blur-md border border-white/5 rounded-[32px] p-8">
-                            <div className="flex items-center justify-between mb-6">
-                                <h3 className="text-white font-bold flex items-center gap-2"><Icon name="BarChart2" className="text-indigo-400"/> Flujo de Caja</h3>
+                        {/* 3. Daily Trend Chart (Mini) */}
+                        <div className="lg:col-span-3 bg-[#0f172a]/40 backdrop-blur-md border border-white/5 rounded-[32px] p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h4 className="text-white font-bold flex items-center gap-2"><Icon name="BarChart" size={16} className="text-indigo-400"/> Actividad Diaria</h4>
+                                <span className="text-xs text-slate-500 uppercase font-bold">Últimos 30 días</span>
                             </div>
-                            <div className={`h-64 w-full ${blurClass}`}>
-                                <canvas ref={lineChartRef}></canvas>
+                            <div className={`h-40 w-full ${blurClass}`}>
+                                <canvas ref={chartRefs.trend}></canvas>
                             </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* STATS VIEW (NUEVA PESTAÑA) */}
+                {tabView === 'stats' && (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-enter">
+                        {/* Gráfico 1: Proyección */}
+                        <div className="bg-[#1e293b]/50 border border-white/10 rounded-[32px] p-6">
+                            <h4 className="text-white font-bold mb-4 flex items-center gap-2"><Icon name="TrendingUp" className="text-indigo-400"/> Proyección de Cierre</h4>
+                            <div className={`h-64 ${blurClass}`}><canvas ref={chartRefs.projection}></canvas></div>
+                            <p className="text-center text-xs text-slate-400 mt-4">Estimación basada en el flujo actual del mes.</p>
+                        </div>
+
+                        {/* Gráfico 2: Breakdown */}
+                        <div className="bg-[#1e293b]/50 border border-white/10 rounded-[32px] p-6">
+                            <h4 className="text-white font-bold mb-4 flex items-center gap-2"><Icon name="PieChart" className="text-pink-400"/> Distribución de Gastos</h4>
+                            <div className={`h-64 flex justify-center ${blurClass}`}><canvas ref={chartRefs.breakdown}></canvas></div>
+                        </div>
+
+                        {/* Gráfico 3: Comparativa Diaria */}
+                        <div className="lg:col-span-2 bg-[#1e293b]/50 border border-white/10 rounded-[32px] p-6">
+                            <h4 className="text-white font-bold mb-4 flex items-center gap-2"><Icon name="Activity" className="text-emerald-400"/> Flujo Diario (Ingresos vs Gastos)</h4>
+                            <div className={`h-64 ${blurClass}`}><canvas ref={chartRefs.daily}></canvas></div>
                         </div>
                     </div>
                 )}
@@ -399,44 +515,27 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                 {/* LIST VIEW */}
                 {tabView === 'list' && (
                     <div className="animate-enter space-y-6">
-                        {/* Filters & Actions Bar */}
-                        <div className="sticky top-0 z-40 bg-[#020617]/80 backdrop-blur-xl p-4 rounded-3xl border border-white/10 shadow-2xl mb-8">
+                        <div className="sticky top-0 z-40 bg-[#020617]/90 backdrop-blur-xl p-4 rounded-3xl border border-white/10 shadow-2xl">
                             <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
                                 <div className="flex items-center gap-3 w-full md:w-auto flex-1">
                                     <div className="relative w-full md:max-w-md">
                                         <Icon name="Search" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18}/>
                                         <input className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all" 
-                                            placeholder="Buscar movimiento..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
+                                            placeholder="Buscar..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
                                     </div>
                                 </div>
                                 <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 hide-scrollbar">
-                                    {[
-                                        {id: 'all', label: 'Todo'},
-                                        {id: 'income', label: 'Ingresos'},
-                                        {id: 'expense', label: 'Gastos'}
-                                    ].map(f => (
-                                        <button key={f.id} onClick={()=>setFilterType(f.id)} className={`px-5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap border transition-all ${filterType===f.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-transparent border-white/10 text-slate-400 hover:bg-white/5'}`}>
-                                            {f.label}
-                                        </button>
+                                    {[ {id:'all',l:'Todo'}, {id:'income',l:'Ingresos'}, {id:'expense',l:'Gastos'}, {id:'recurring',l:'Fijos'} ].map(f => (
+                                        <button key={f.id} onClick={()=>setFilterType(f.id)} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap border transition-all ${filterType===f.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-transparent border-white/10 text-slate-400 hover:bg-white/5'}`}>{f.l}</button>
                                     ))}
                                     <div className="w-px h-8 bg-white/10 mx-2"></div>
-                                    <button onClick={handleExportCSV} className="px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-all flex items-center gap-2">
-                                        <Icon name="Download" size={16}/> CSV
-                                    </button>
-                                    <button onClick={selectAll} className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-300 hover:text-white text-xs font-bold transition-all flex items-center gap-2">
-                                        <Icon name="CheckSquare" size={16}/> {selectedIds.length === monthlyData.length && monthlyData.length > 0 ? 'Desmarcar' : 'Todos'}
-                                    </button>
+                                    <button onClick={handleExportCSV} className="px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center gap-2"><Icon name="Download" size={16}/> CSV</button>
+                                    <button onClick={selectAll} className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-300 text-xs font-bold flex items-center gap-2"><Icon name="CheckSquare" size={16}/> {selectedIds.length>0?'Nada':'Todo'}</button>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Transactions Grid */}
-                        {monthlyData.length === 0 ? (
-                             <div className="text-center py-20 opacity-50">
-                                 <Icon name="Wind" size={48} className="mx-auto mb-4 text-slate-600"/>
-                                 <p>No hay nada por aquí...</p>
-                             </div>
-                        ) : (
+                        {monthlyData.length === 0 ? <div className="text-center py-20 opacity-50"><p>Sin movimientos</p></div> : (
                             <div className="grid grid-cols-1 gap-3">
                                 {monthlyData.map(f => {
                                     const isSelected = selectedIds.includes(f.id);
@@ -447,23 +546,18 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                                     return (
                                         <div key={f.id} onClick={() => setExpandedId(isExpanded ? null : f.id)}
                                             className={`group relative bg-white/5 border ${isSelected ? 'border-indigo-500 bg-indigo-500/10' : 'border-white/5 hover:border-white/20'} rounded-2xl transition-all duration-300 overflow-hidden cursor-pointer`}>
-                                            
                                             <div className="p-4 flex items-center gap-4">
-                                                <div onClick={(e)=>e.stopPropagation()}>
-                                                    <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(f.id)} 
-                                                        className="w-5 h-5 rounded border-slate-600 bg-slate-800/50 checked:bg-indigo-500 cursor-pointer appearance-none checked:border-transparent relative after:content-['✓'] after:absolute after:text-white after:text-xs after:left-1 after:top-0"/>
-                                                </div>
-
+                                                <div onClick={(e)=>e.stopPropagation()}><input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(f.id)} className="w-5 h-5 rounded border-slate-600 bg-slate-800/50 checked:bg-indigo-500 cursor-pointer"/></div>
                                                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-inner flex-shrink-0 ${isIncome ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
                                                     <Icon name={f.type==='Culto'?'Church':(categories.find(c=>c.value===f.category)?.icon || 'Hash')} />
                                                 </div>
-
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex justify-between items-start">
-                                                        <h4 className="text-white font-bold truncate pr-4">{f.type==='Culto'?'Culto General':f.category}</h4>
-                                                        <span className={`font-mono font-bold ${isIncome?'text-emerald-400':'text-rose-400'} ${blurClass}`}>
-                                                            {showBalance ? formatCurrency(amount) : '••••'}
-                                                        </span>
+                                                        <div className="flex items-center gap-2">
+                                                            <h4 className="text-white font-bold truncate">{f.type==='Culto'?'Culto General':f.category}</h4>
+                                                            {f.isRecurring && <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30">FIJO</span>}
+                                                        </div>
+                                                        <span className={`font-mono font-bold ${isIncome?'text-emerald-400':'text-rose-400'} ${blurClass}`}>{showBalance ? formatCurrency(amount) : '••••'}</span>
                                                     </div>
                                                     <div className="flex justify-between items-end mt-1">
                                                         <p className="text-slate-500 text-xs truncate max-w-[200px]">{f.notes || f.method}</p>
@@ -471,17 +565,8 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                                                     </div>
                                                 </div>
                                             </div>
-
-                                            {/* Expanded Details */}
-                                            <div className={`bg-black/20 border-t border-white/5 transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-48 opacity-100 p-4' : 'max-h-0 opacity-0 overflow-hidden'}`}>
-                                                <div className="flex justify-between items-center text-sm mb-2">
-                                                    <span className="text-slate-400">Detalle Completo:</span>
-                                                    <span className="text-white">{f.notes || "Sin notas"}</span>
-                                                </div>
-                                                <div className="flex justify-end gap-3 mt-3">
-                                                    {f.attachmentUrl && <a href={f.attachmentUrl} target="_blank" className="text-indigo-400 text-xs font-bold hover:underline flex items-center gap-1"><Icon name="Image" size={14}/> Ver Recibo</a>}
-                                                    <button onClick={(e)=>{e.stopPropagation(); handleExportPDF(f)}} className="text-white bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2"><Icon name="Printer" size={14}/> Imprimir PDF</button>
-                                                </div>
+                                            <div className={`bg-black/20 border-t border-white/5 transition-all duration-300 ${isExpanded ? 'max-h-48 opacity-100 p-4' : 'max-h-0 opacity-0 overflow-hidden'}`}>
+                                                <div className="flex justify-end gap-3"><button onClick={(e)=>{e.stopPropagation(); handleExportPDF(f)}} className="text-white bg-indigo-600 px-3 py-1.5 rounded-lg text-xs font-bold flex gap-2"><Icon name="Printer" size={14}/> Imprimir PDF</button></div>
                                             </div>
                                         </div>
                                     );
@@ -491,55 +576,49 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                     </div>
                 )}
 
-                {/* GOALS VIEW (NEW 2.0) */}
+                {/* GOALS VIEW (Sobres Digitales) */}
                 {tabView === 'goals' && (
                     <div className="animate-enter space-y-6">
-                        <div className="flex justify-end">
-                            <button onClick={()=>openGoalModal()} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-indigo-600/20 transition-all flex items-center gap-2">
-                                <Icon name="Target" size={18}/> Crear Meta
-                            </button>
+                        {/* Resumen de Sobres */}
+                        <div className="bg-gradient-to-r from-indigo-900/50 to-purple-900/50 p-6 rounded-[32px] border border-white/10">
+                            <h3 className="text-white font-bold mb-4">Distribución de Fondos</h3>
+                            <div className="flex gap-8">
+                                <div>
+                                    <span className="text-slate-400 text-xs uppercase font-bold">Total Asignado (Sobres)</span>
+                                    <p className={`text-2xl font-black text-emerald-400 ${blurClass}`}>{formatCurrency(totalAllocated)}</p>
+                                </div>
+                                <div>
+                                    <span className="text-slate-400 text-xs uppercase font-bold">Total Libre</span>
+                                    <p className={`text-2xl font-black text-white ${blurClass}`}>{formatCurrency(freeBalance)}</p>
+                                </div>
+                            </div>
+                            <div className="w-full bg-white/10 h-2 rounded-full mt-4 overflow-hidden flex">
+                                <div className="bg-emerald-500 h-full" style={{width: `${(totalAllocated/globalBalances.total)*100}%`}}></div>
+                            </div>
                         </div>
 
+                        <div className="flex justify-end"><button onClick={()=>setIsGoalModalOpen(true)} className="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2"><Icon name="PlusCircle" size={18}/> Crear Meta/Sobre</button></div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {goals.map(g => {
                                 const { current, target, pct } = getGoalProgress(g);
-                                const isSaving = g.type === 'saving'; // Green/Blue theme
-                                const colorClass = isSaving ? 'emerald' : 'orange'; // Tailwind dynamic class limitation: prefer static
-                                const colorHex = isSaving ? '#10b981' : '#f97316';
-                                const catIcon = categories.find(c=>c.value===g.category)?.icon || 'Star';
-
+                                const isSaving = g.type === 'saving';
+                                const colorClass = isSaving ? 'text-emerald-400' : 'text-orange-400';
+                                const barColor = isSaving ? '#10b981' : '#f97316';
+                                
                                 return (
-                                    <div key={g.id} onClick={()=>openGoalModal(g)} className="cursor-pointer group relative bg-white/5 hover:bg-white/10 border border-white/5 hover:border-indigo-500/30 rounded-3xl p-6 transition-all duration-300">
+                                    <div key={g.id} className="bg-white/5 border border-white/5 rounded-3xl p-6 relative overflow-hidden group">
                                         <div className="flex justify-between items-start mb-4">
                                             <div className="flex items-center gap-3">
-                                                <div className={`p-3 rounded-2xl ${isSaving ? 'bg-emerald-500/20 text-emerald-400' : 'bg-orange-500/20 text-orange-400'}`}>
-                                                    <Icon name={catIcon} size={24}/>
-                                                </div>
+                                                <div className={`p-3 rounded-2xl ${isSaving?'bg-emerald-500/20':'bg-orange-500/20'} ${colorClass}`}><Icon name={isSaving?'Archive':'AlertCircle'} size={24}/></div>
                                                 <div>
-                                                    <h4 className="text-white font-bold text-lg">{g.label || g.category}</h4>
-                                                    <p className="text-slate-500 text-xs uppercase font-bold">{isSaving ? 'Meta de Ahorro' : 'Límite de Gasto'}</p>
+                                                    <h4 className="text-white font-bold">{g.label || g.category}</h4>
+                                                    <p className="text-slate-500 text-xs uppercase font-bold">{isSaving ? 'Sobre de Ahorro' : 'Límite de Gasto'}</p>
                                                 </div>
                                             </div>
-                                            <div className={`px-3 py-1 rounded-full text-xs font-black ${isSaving ? 'bg-emerald-500/10 text-emerald-400' : 'bg-orange-500/10 text-orange-400'}`}>
-                                                {pct}%
-                                            </div>
+                                            {isSaving && <button onClick={()=>handleDeleteGoal(g.id)} className="text-slate-600 hover:text-red-400"><Icon name="Trash" size={16}/></button>}
                                         </div>
-                                        
-                                        <div className="relative h-4 bg-white/5 rounded-full overflow-hidden mb-4 shadow-inner">
-                                            <div className={`absolute top-0 left-0 h-full rounded-full transition-all duration-1000 ${isSaving ? 'bg-emerald-500' : 'bg-orange-500'} shadow-[0_0_15px_rgba(0,0,0,0.5)]`}
-                                                style={{ width: `${Math.min(pct, 100)}%`, boxShadow: `0 0 20px ${colorHex}` }}></div>
-                                        </div>
-
-                                        <div className="flex justify-between items-end">
-                                            <div>
-                                                <p className="text-slate-500 text-xs mb-1">{isSaving ? 'Recaudado' : 'Gastado'}</p>
-                                                <p className={`text-xl font-black ${blurClass} text-white`}>{formatCurrency(current)}</p>
-                                            </div>
-                                            <div className="text-right">
-                                                <p className="text-slate-500 text-xs mb-1">Meta</p>
-                                                <p className={`text-lg font-bold text-slate-300 ${blurClass}`}>{formatCurrency(target)}</p>
-                                            </div>
-                                        </div>
+                                        <div className="relative h-3 bg-white/5 rounded-full overflow-hidden mb-4"><div className="absolute h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: barColor, boxShadow: `0 0 15px ${barColor}` }}></div></div>
+                                        <div className="flex justify-between text-xs font-bold text-slate-400"><span>{isSaving?'Guardado':'Gastado'}: <span className={`text-white ${blurClass}`}>{formatCurrency(current)}</span></span><span>Meta: {formatCurrency(target)}</span></div>
                                     </div>
                                 );
                             })}
@@ -548,139 +627,79 @@ window.Views.Finances = ({ finances, addData, userProfile }) => {
                 )}
             </div>
 
-            {/* FIXED BULK DELETE BAR (OUTSIDE EVERYTHING) */}
-            {selectedIds.length > 0 && (
-                <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-[9999] animate-enter">
-                    <div className="bg-white/10 backdrop-blur-xl border border-white/20 text-white pl-6 pr-2 py-2 rounded-full shadow-[0_20px_40px_rgba(0,0,0,0.5)] flex items-center gap-6">
-                        <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Selección</span>
-                            <span className="text-base font-black leading-none">{selectedIds.length} items</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <button onClick={()=>setSelectedIds([])} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors text-slate-300"><Icon name="X"/></button>
-                            <button onClick={handleBulkDelete} className="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-full font-bold shadow-lg shadow-red-500/30 transition-all flex items-center gap-2">
-                                <Icon name="Trash2" size={18}/> Eliminar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* ACTION BAR FIXED */}
+            {selectedIds.length > 0 && <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-white/10 backdrop-blur-xl border border-white/20 p-2 rounded-full flex gap-4 shadow-2xl"><span className="text-white font-bold px-4 py-2">{selectedIds.length} seleccionados</span><button onClick={handleBulkDelete} className="bg-red-500 text-white px-6 rounded-full font-bold flex items-center gap-2"><Icon name="Trash2" size={18}/> Eliminar</button></div>}
 
-            {/* MODAL REGISTRO */}
-            <Modal isOpen={isModalOpen} onClose={()=>setIsModalOpen(false)} title="Nuevo Movimiento">
+            {/* MODAL REGISTRO + ALLOCATION */}
+            <Modal isOpen={isModalOpen} onClose={()=>setIsModalOpen(false)} title="Nueva Operación">
                 <div className="space-y-5">
-                    <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1.5 rounded-2xl">
-                        {['Culto','Gasto','Ingreso'].map(t=><button key={t} onClick={()=>setForm({...initialForm, type:t})} className={`py-2 text-xs font-black uppercase tracking-wide rounded-xl transition-all ${form.type===t?'bg-white text-indigo-900 shadow-sm':'text-slate-400 hover:text-slate-600'}`}>{t}</button>)}
+                    <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1 rounded-xl">
+                        {['Culto','Gasto','Ingreso'].map(t=><button key={t} onClick={()=>setForm({...initialForm, type:t})} className={`py-2 text-xs font-black uppercase rounded-lg transition-all ${form.type===t?'bg-white text-indigo-900 shadow':'text-slate-400'}`}>{t}</button>)}
                     </div>
                     <Input type="date" value={form.date} onChange={e=>setForm({...form, date:e.target.value})}/>
                     
                     {form.type==='Culto' ? (
                         <div className="space-y-4">
-                            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
-                                <span className="text-xs font-bold text-slate-400 uppercase block mb-3">Efectivo</span>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <Input label="Diezmos" type="number" value={form.tithesCash} onChange={e=>setForm({...form, tithesCash:e.target.value})}/>
-                                    <Input label="Ofrendas" type="number" value={form.offeringsCash} onChange={e=>setForm({...form, offeringsCash:e.target.value})}/>
-                                </div>
-                            </div>
-                            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
-                                <span className="text-xs font-bold text-slate-400 uppercase block mb-3">Digital</span>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <Input label="Diezmos" type="number" value={form.tithesTransfer} onChange={e=>setForm({...form, tithesTransfer:e.target.value})}/>
-                                    <Input label="Ofrendas" type="number" value={form.offeringsTransfer} onChange={e=>setForm({...form, offeringsTransfer:e.target.value})}/>
-                                </div>
-                            </div>
+                            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200"><span className="text-xs font-bold text-slate-400 uppercase block mb-2">Efectivo</span><div className="grid grid-cols-2 gap-3"><Input label="Diezmos" type="number" value={form.tithesCash} onChange={e=>setForm({...form, tithesCash:e.target.value})}/><Input label="Ofrendas" type="number" value={form.offeringsCash} onChange={e=>setForm({...form, offeringsCash:e.target.value})}/></div></div>
+                            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200"><span className="text-xs font-bold text-slate-400 uppercase block mb-2">Digital</span><div className="grid grid-cols-2 gap-3"><Input label="Diezmos" type="number" value={form.tithesTransfer} onChange={e=>setForm({...form, tithesTransfer:e.target.value})}/><Input label="Ofrendas" type="number" value={form.offeringsTransfer} onChange={e=>setForm({...form, offeringsTransfer:e.target.value})}/></div></div>
                         </div>
                     ) : (
                         <>
-                            <div className="grid grid-cols-2 gap-4">
-                                <Input label="Monto" type="number" value={form.amount} onChange={e=>setForm({...form, amount:e.target.value})} className="font-mono text-xl font-bold"/>
-                                <Select label="Método" value={form.method} onChange={e=>setForm({...form, method:e.target.value})}><option>Efectivo</option><option>Banco</option></Select>
-                            </div>
+                            <div className="grid grid-cols-2 gap-4"><Input label="Monto" type="number" value={form.amount} onChange={e=>setForm({...form, amount:e.target.value})} className="font-mono text-xl font-bold"/><Select label="Método" value={form.method} onChange={e=>setForm({...form, method:e.target.value})}><option>Efectivo</option><option>Banco</option></Select></div>
                             <SmartSelect label="Categoría" options={categories} value={form.category} onChange={v=>setForm({...form, category:v})}/>
+                            {form.type === 'Gasto' && (
+                                <div className="flex items-center gap-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100 cursor-pointer" onClick={()=>setForm({...form, isRecurring: !form.isRecurring})}>
+                                    <div className={`w-5 h-5 rounded border flex items-center justify-center ${form.isRecurring ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'}`}>{form.isRecurring && <Icon name="Check" size={12} className="text-white"/>}</div>
+                                    <span className="text-sm font-bold text-indigo-900">¿Es un Gasto Fijo Mensual?</span>
+                                </div>
+                            )}
                         </>
                     )}
+
+                    {/* ALLOCATION LOGIC (DESTINAR A META) */}
+                    {(form.type === 'Ingreso' || form.type === 'Culto') && goals.some(g=>g.type==='saving') && (
+                         <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl">
+                            <p className="text-xs font-bold text-emerald-600 uppercase mb-2">¿Destinar parte a un Sobre/Meta?</p>
+                            <div className="flex gap-2 mb-2">
+                                <select className="w-full p-2 rounded-lg border border-emerald-200 text-sm" value={form.allocateToGoalId} onChange={e=>setForm({...form, allocateToGoalId:e.target.value})}>
+                                    <option value="">-- No Asignar --</option>
+                                    {goals.filter(g=>g.type==='saving').map(g=><option key={g.id} value={g.id}>{g.label || g.category}</option>)}
+                                </select>
+                            </div>
+                            {form.allocateToGoalId && <Input label="Monto a Destinar" type="number" value={form.allocationAmount} onChange={e=>setForm({...form, allocationAmount:e.target.value})} />}
+                         </div>
+                    )}
+
                     <Input label="Notas" value={form.notes} onChange={e=>setForm({...form, notes:e.target.value})}/>
-                    <div className="flex gap-3 mt-4">
-                        <label className={`flex-1 p-3 border-2 border-dashed rounded-xl flex justify-center items-center gap-2 cursor-pointer transition-colors ${form.attachmentUrl ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 hover:border-indigo-400 hover:bg-indigo-50 text-slate-400'}`}>
-                            <Icon name={form.attachmentUrl?"Check":"Camera"} size={18}/> 
-                            <span className="text-xs font-bold">{isUploading?'Subiendo...':(form.attachmentUrl?'Comprobante Listo':'Adjuntar Foto')}</span>
-                            <input type="file" className="hidden" onChange={handleImage}/>
-                        </label>
-                    </div>
-                    <Button className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-indigo-600/20" onClick={handleSave} disabled={isUploading}>Guardar</Button>
+                    <div className="flex gap-3"><label className={`flex-1 p-3 border-2 border-dashed rounded-xl flex justify-center items-center gap-2 cursor-pointer ${form.attachmentUrl?'border-emerald-500 bg-emerald-50 text-emerald-600':'border-slate-300'}`}><Icon name="Camera" size={18}/><input type="file" className="hidden" onChange={handleImage}/></label></div>
+                    <Button className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-xl" onClick={handleSave}>Guardar Operación</Button>
                 </div>
             </Modal>
 
             {/* MODAL METAS */}
-            <Modal isOpen={isGoalModalOpen} onClose={()=>setIsGoalModalOpen(false)} title={goalForm.id ? "Editar Meta" : "Nueva Meta"}>
+            <Modal isOpen={isGoalModalOpen} onClose={()=>setIsGoalModalOpen(false)} title="Nueva Meta / Sobre">
                 <div className="space-y-5">
-                    <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-2xl">
-                        <button onClick={()=>setGoalForm({...goalForm, type:'spending'})} className={`py-2 text-xs font-black uppercase rounded-xl transition-all ${goalForm.type==='spending'?'bg-white text-orange-500 shadow-sm':'text-slate-400'}`}>Límite Gasto</button>
-                        <button onClick={()=>setGoalForm({...goalForm, type:'saving'})} className={`py-2 text-xs font-black uppercase rounded-xl transition-all ${goalForm.type==='saving'?'bg-white text-emerald-500 shadow-sm':'text-slate-400'}`}>Ahorro / Ingreso</button>
+                    <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl">
+                        <button onClick={()=>setGoalForm({...goalForm, type:'spending'})} className={`py-2 text-xs font-black uppercase rounded-lg ${goalForm.type==='spending'?'bg-white text-orange-500 shadow':'text-slate-400'}`}>Límite Gasto</button>
+                        <button onClick={()=>setGoalForm({...goalForm, type:'saving'})} className={`py-2 text-xs font-black uppercase rounded-lg ${goalForm.type==='saving'?'bg-white text-emerald-500 shadow':'text-slate-400'}`}>Sobre Ahorro</button>
                     </div>
-
-                    <Input label="Nombre de la Meta (Opcional)" placeholder="Ej: Sueldo Pastoral, Alquiler..." value={goalForm.label} onChange={e=>setGoalForm({...goalForm, label:e.target.value})}/>
-                    <SmartSelect label="Categoría a Monitorear" options={categories} value={goalForm.category} onChange={v=>setGoalForm({...goalForm, category:v})}/>
-                    
-                    <div className="bg-slate-50 p-4 rounded-2xl text-center border border-slate-200">
-                        <p className="text-xs text-slate-500 mb-2 uppercase font-bold">{goalForm.type==='spending' ? 'Límite Máximo' : 'Objetivo a Juntar'}</p>
-                        <Input type="number" value={goalForm.amount} onChange={e=>setGoalForm({...goalForm, amount:e.target.value})} className="text-center text-4xl font-black bg-transparent border-none outline-none text-slate-800 placeholder-slate-300"/>
-                    </div>
-
-                    <div className="flex gap-3">
-                        {goalForm.id && <button onClick={()=>handleDeleteGoal(goalForm.id)} className="p-4 rounded-2xl bg-red-50 text-red-500 hover:bg-red-100"><Icon name="Trash" size={20}/></button>}
-                        <Button className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold" onClick={handleSaveGoal}>Guardar Meta</Button>
-                    </div>
+                    <Input label="Nombre (ej: Sueldo Pastor)" value={goalForm.label} onChange={e=>setGoalForm({...goalForm, label:e.target.value})}/>
+                    <SmartSelect label="Categoría" options={categories} value={goalForm.category} onChange={v=>setGoalForm({...goalForm, category:v})}/>
+                    <div className="bg-slate-50 p-4 rounded-xl text-center border border-slate-200"><p className="text-xs text-slate-500 mb-2 uppercase font-bold">Monto Objetivo</p><Input type="number" value={goalForm.amount} onChange={e=>setGoalForm({...goalForm, amount:e.target.value})} className="text-center text-4xl font-black bg-transparent border-none outline-none text-slate-800"/></div>
+                    {/* Campo para saldo inicial manual en ahorro */}
+                    {goalForm.type === 'saving' && <Input label="Saldo Inicial en el Sobre" type="number" value={goalForm.currentSaved} onChange={e=>setGoalForm({...goalForm, currentSaved:e.target.value})} />}
+                    <Button className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold" onClick={handleSaveGoal}>Crear</Button>
                 </div>
             </Modal>
 
-            {/* ELEMENTO OCULTO PARA PDF (Recuperado) */}
-            {pdfData && (
-                <div ref={printRef} style={{ display: 'none', width: '100mm', minHeight: '150mm', background: 'white', color: '#1e293b', padding: '0', fontFamily: 'sans-serif', position: 'relative' }}>
-                    <div style={{ background: '#4f46e5', height: '8px', width: '100%' }}></div>
-                    <div style={{ padding: '30px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' }}>
-                            <div>
-                                <h1 style={{ margin: 0, fontSize: '20px', fontWeight: '900', color: '#4f46e5' }}>CONQUISTADORES</h1>
-                                <p style={{ margin: 0, fontSize: '10px', color: '#94a3b8', letterSpacing: '1px' }}>COMPROBANTE DIGITAL</p>
-                            </div>
-                            <div style={{ textAlign: 'right' }}>
-                                <p style={{ margin: 0, fontSize: '10px', color: '#94a3b8' }}>FECHA</p>
-                                <p style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }}>{formatDate(pdfData.date)}</p>
-                            </div>
-                        </div>
-
-                        <div style={{ textAlign: 'center', margin: '40px 0' }}>
-                            <p style={{ fontSize: '12px', textTransform: 'uppercase', color: '#64748b', marginBottom: '5px' }}>Monto Total</p>
-                            <h2 style={{ fontSize: '42px', margin: '0', fontWeight: '900', color: '#0f172a' }}>{formatCurrency(pdfData.total || pdfData.amount)}</h2>
-                            <div style={{ display: 'inline-block', padding: '5px 15px', background: '#f1f5f9', borderRadius: '20px', marginTop: '10px', fontSize: '11px', fontWeight: 'bold', color: '#475569' }}>
-                                {pdfData.type==='Culto'?'INGRESO':'GASTO'} / {pdfData.method?.toUpperCase()}
-                            </div>
-                        </div>
-                        
-                        <div style={{ borderTop: '2px dashed #e2e8f0', borderBottom: '2px dashed #e2e8f0', padding: '20px 0', marginBottom: '20px' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '13px' }}>
-                                <span style={{ color: '#64748b' }}>Categoría</span>
-                                <span style={{ fontWeight: 'bold' }}>{pdfData.type==='Culto'?'Culto General':pdfData.category}</span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                                <span style={{ color: '#64748b' }}>ID Referencia</span>
-                                <span style={{ fontWeight: 'bold', fontFamily: 'monospace' }}>#{pdfData.id?.slice(0,8).toUpperCase()}</span>
-                            </div>
-                        </div>
-
-                        {pdfData.notes && (
-                            <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '10px', fontSize: '12px', color: '#475569', fontStyle: 'italic' }}>
-                                "{pdfData.notes}"
-                            </div>
-                        )}
-                    </div>
-                    <div style={{ position: 'absolute', bottom: '30px', left: '0', width: '100%', textAlign: 'center' }}>
-                        <p style={{ fontSize: '9px', color: '#cbd5e1' }}>Documento generado electrónicamente por CDS App</p>
-                    </div>
-                </div>
-            )}
+            {/* PDF HIDDEN */}
+            {pdfData && <div ref={printRef} style={{display:'none',width:'100mm',background:'white',padding:'30px',color:'#1e293b'}}>
+                <div style={{background:'#4f46e5',height:'5px',marginBottom:'20px'}}></div>
+                <h1 style={{fontSize:'18px',fontWeight:'900',color:'#4f46e5'}}>CONQUISTADORES</h1>
+                <p style={{fontSize:'10px',color:'#94a3b8'}}>COMPROBANTE OFICIAL</p>
+                <div style={{margin:'30px 0',textAlign:'center'}}><h2 style={{fontSize:'36px',fontWeight:'900'}}>{formatCurrency(pdfData.total||pdfData.amount)}</h2></div>
+                <div style={{borderTop:'1px dashed #e2e8f0',paddingTop:'10px',fontSize:'12px'}}><p><strong>Fecha:</strong> {formatDate(pdfData.date)}</p><p><strong>Concepto:</strong> {pdfData.category}</p><p><strong>Notas:</strong> {pdfData.notes}</p></div>
+            </div>}
         </div>
     );
 };
