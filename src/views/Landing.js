@@ -1,12 +1,30 @@
 window.Views = window.Views || {};
 
 window.Views.Landing = ({ onEnterSystem }) => {
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
     const Utils = window.Utils || {};
     const { Icon } = Utils;
 
     const [scrolled, setScrolled] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
+    
+    // --- LÓGICA DE RADIO (FASE 2) ---
+    // Usamos una referencia para el audio para no re-crearlo en cada render
+    const audioRef = useRef(new Audio('https://stream.zeno.fm/g6225130834tv')); // URL genérica de radio cristiana, CAMBIAR por la real
+
+    useEffect(() => {
+        const audio = audioRef.current;
+        if (isPlaying) {
+            audio.play().catch(e => {
+                console.error("Error al reproducir radio:", e);
+                setIsPlaying(false); // Revertir si falla (ej: autoplay bloqueado)
+            });
+        } else {
+            audio.pause();
+        }
+        // Cleanup al salir de la página
+        return () => audio.pause();
+    }, [isPlaying]);
 
     // Detectar scroll para el navbar
     useEffect(() => {
@@ -15,7 +33,7 @@ window.Views.Landing = ({ onEnterSystem }) => {
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
-    // Datos Mock para la web
+    // Datos Mock (Idealmente vendrían del GlobalCalendar más adelante)
     const events = [
         { day: 'DOM', date: '10:00 AM', title: 'Reunión General', desc: 'Un tiempo de adoración y palabra para toda la familia.' },
         { day: 'MIE', date: '20:00 PM', title: 'Escuela de Vida', desc: 'Profundizando en las escrituras y el discipulado.' },
@@ -107,7 +125,7 @@ window.Views.Landing = ({ onEnterSystem }) => {
                 </div>
             </section>
 
-            {/* --- SECCIÓN RADIO --- */}
+            {/* --- SECCIÓN RADIO (FUNCIONAL) --- */}
             <section id="radio" className="py-20 bg-slate-900 text-white relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-96 h-96 bg-brand-600/20 rounded-full blur-[100px]"></div>
                 <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-600/20 rounded-full blur-[80px]"></div>
@@ -129,11 +147,11 @@ window.Views.Landing = ({ onEnterSystem }) => {
                             </button>
                             <div className="flex-1">
                                 <p className="text-xs text-slate-400 font-bold uppercase tracking-wide">Ahora suena</p>
-                                <p className="font-bold text-white">Tu Fidelidad - Marcos Witt</p>
+                                <p className="font-bold text-white">Transmisión en Vivo</p>
                             </div>
                             <div className="flex gap-1 items-end h-8">
                                 {[1,2,3,4,5].map(n => (
-                                    <div key={n} className={`w-1 bg-brand-500 rounded-full ${isPlaying ? 'animate-pulse' : 'h-2'}`} style={{height: isPlaying ? `${Math.random() * 24 + 4}px` : '4px', animationDuration: `${Math.random() * 0.5 + 0.5}s`}}></div>
+                                    <div key={n} className={`w-1 bg-brand-500 rounded-full ${isPlaying ? 'animate-pulse' : 'h-1'}`} style={{height: isPlaying ? `${Math.random() * 24 + 4}px` : '4px', animationDuration: `${Math.random() * 0.5 + 0.5}s`}}></div>
                                 ))}
                             </div>
                         </div>
@@ -142,12 +160,13 @@ window.Views.Landing = ({ onEnterSystem }) => {
                          <img 
                             src="https://images.unsplash.com/photo-1478737270239-2f02b77ac6d5?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80" 
                             className="rounded-3xl shadow-2xl border-4 border-white/10 rotate-3 hover:rotate-0 transition-transform duration-500"
+                            loading="lazy"
                         />
                     </div>
                 </div>
             </section>
 
-            {/* --- SECCIÓN MINISTRIOS --- */}
+            {/* --- SECCIÓN MINISTRIOS (LAZY LOAD) --- */}
             <section id="ministerios" className="py-20 bg-slate-50">
                 <div className="max-w-7xl mx-auto px-6">
                     <div className="text-center mb-16">
@@ -163,7 +182,7 @@ window.Views.Landing = ({ onEnterSystem }) => {
                             { name: 'Hombres', img: 'https://images.unsplash.com/photo-1552642986-ccb41e7059e7?auto=format&fit=crop&w=500&q=80' }
                         ].map((m, i) => (
                             <div key={i} className="relative group rounded-2xl overflow-hidden h-80 cursor-pointer">
-                                <img src={m.img} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
+                                <img src={m.img} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" loading="lazy" />
                                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
                                 <div className="absolute bottom-6 left-6">
                                     <h4 className="text-2xl font-bold text-white mb-1">{m.name}</h4>
