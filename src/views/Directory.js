@@ -4,7 +4,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
     // 1. HOOKS
     const { useState, useMemo, useRef, useEffect } = React;
     const Utils = window.Utils || {};
-    const { Icon, Button, Input, Modal, Select, SmartSelect } = Utils;
+    const { Icon, Button, Input, Modal, Select, SmartSelect, ConfirmModal } = Utils;
 
     // 2. ESTADOS
     const [searchTerm, setSearchTerm] = useState('');
@@ -12,6 +12,9 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
     const [isEditing, setIsEditing] = useState(false); 
     const [isFlipped, setIsFlipped] = useState(false); 
     const [isDownloading, setIsDownloading] = useState(false);
+    
+    // ESTADOS PARA ELIMINACIÓN SEGURA
+    const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: null });
     
     // --- LISTAS FIJAS ---
     const ROLES = ['Pastor', 'Líder', 'Servidor', 'Miembro'];
@@ -113,11 +116,18 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
         setIsAddingArea(false);
     };
 
-    const handleDelete = (id) => {
-        if(!confirm("¿Estás seguro de eliminar a este miembro permanentemente?")) return;
-        deleteData('members', id);
-        if (selectedMember?.id === id) setSelectedMember(null);
-        Utils.notify("Miembro eliminado");
+    // --- LÓGICA DE ELIMINACIÓN ACTUALIZADA ---
+    const requestDelete = (id) => {
+        setDeleteModal({ isOpen: true, id });
+    };
+
+    const confirmDelete = () => {
+        if (deleteModal.id) {
+            deleteData('members', deleteModal.id);
+            if (selectedMember?.id === deleteModal.id) setSelectedMember(null);
+            Utils.notify("Miembro eliminado");
+        }
+        setDeleteModal({ isOpen: false, id: null });
     };
 
     const handleSave = () => {
@@ -389,7 +399,7 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                         {userProfile?.role === 'Pastor' && (
                             <div className="flex flex-col gap-1 border-l border-slate-100 pl-2">
                                 <button onClick={()=>handleEdit(member)} className="text-slate-400 hover:text-brand-600 p-1"><Icon name="Edit" size={14}/></button>
-                                <button onClick={()=>handleDelete(member.id)} className="text-slate-400 hover:text-red-600 p-1"><Icon name="Trash" size={14}/></button>
+                                <button onClick={()=>requestDelete(member.id)} className="text-slate-400 hover:text-red-600 p-1"><Icon name="Trash" size={14}/></button>
                             </div>
                         )}
                     </div>
@@ -460,6 +470,15 @@ window.Views.Directory = ({ members, addData, updateData, deleteData, userProfil
                     <Button className="w-full mt-4" onClick={handleSave}>Guardar Datos</Button>
                 </div>
             </Modal>
+
+            {/* Modal Confirmación Eliminación */}
+            <ConfirmModal 
+                isOpen={deleteModal.isOpen} 
+                onClose={() => setDeleteModal({ isOpen: false, id: null })} 
+                onConfirm={confirmDelete}
+                title="Eliminar Miembro"
+                message="Esta acción eliminará al miembro permanentemente. ¿Estás seguro?"
+            />
 
             {/* PDF OCULTO (PLANO) */}
             {selectedMember && (
