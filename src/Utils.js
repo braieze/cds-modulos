@@ -3,31 +3,21 @@
     const { useState, useEffect, useRef } = React;
 
     // --- 1. HELPERS LÓGICOS ---
-
     const parseLocalDate = (dateInput) => {
         if (!dateInput) return new Date();
-        // Soporte para Timestamps de Firebase
-        if (dateInput && typeof dateInput.toDate === 'function') {
-            return dateInput.toDate();
-        }
-        // Soporte para objetos Date
+        if (dateInput && typeof dateInput.toDate === 'function') return dateInput.toDate();
         if (dateInput instanceof Date) return dateInput;
-        // Soporte para Strings ISO
         const d = new Date(dateInput);
         if (!isNaN(d.getTime())) return d;
-        
-        return new Date(); // Fallback
+        return new Date();
     };
 
     const formatDate = (dateStr, fmt = 'short') => {
         if(!dateStr) return '';
         const date = parseLocalDate(dateStr);
-        
         if (fmt === 'long') return date.toLocaleDateString('es-AR', { weekday:'long', day: 'numeric', month: 'long' });
         if (fmt === 'full') return date.toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
         if (fmt === 'time') return date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-        
-        // short default
         return date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     };
 
@@ -103,6 +93,7 @@
             X: <React.Fragment><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></React.Fragment>,
             Plus: <React.Fragment><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></React.Fragment>,
             Trash: <React.Fragment><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></React.Fragment>,
+            Trash2: <React.Fragment><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></React.Fragment>,
             Edit: <React.Fragment><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></React.Fragment>,
             LogOut: <React.Fragment><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></React.Fragment>,
             ChevronLeft: <polyline points="15 18 9 12 15 6"/>,
@@ -138,18 +129,34 @@
             Megaphone: <React.Fragment><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></React.Fragment>,
             Link: <React.Fragment><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></React.Fragment>,
             Eye: <React.Fragment><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></React.Fragment>,
+            EyeOff: <React.Fragment><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></React.Fragment>,
             AlertTriangle: <React.Fragment><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></React.Fragment>,
             UserPlus: <React.Fragment><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></React.Fragment>,
             List: <React.Fragment><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></React.Fragment>,
             Play: <polygon points="5 3 19 12 5 21 5 3"/>,
+            Pause: <React.Fragment><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></React.Fragment>,
             Radio: <React.Fragment><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></React.Fragment>,
             Share2: <React.Fragment><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></React.Fragment>,
             Video: <React.Fragment><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></React.Fragment>,
             RotateCw: <React.Fragment><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></React.Fragment>,
             ArrowRight: <React.Fragment><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></React.Fragment>,
             ArrowUp: <React.Fragment><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></React.Fragment>,
+            ArrowDown: <React.Fragment><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></React.Fragment>,
             Award: <React.Fragment><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></React.Fragment>,
-            Send: <React.Fragment><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></React.Fragment>
+            Send: <React.Fragment><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></React.Fragment>,
+            ExternalLink: <React.Fragment><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></React.Fragment>,
+            PieChart: <path d="M21.21 15.89A10 10 0 1 1 8 2.83M22 12A10 10 0 0 0 12 2v10z"/>,
+            TrendingUp: <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>,
+            BarChart: <React.Fragment><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></React.Fragment>,
+            Archive: <React.Fragment><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></React.Fragment>,
+            PlusCircle: <React.Fragment><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></React.Fragment>,
+            CheckSquare: <React.Fragment><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></React.Fragment>,
+            Lock: <React.Fragment><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></React.Fragment>,
+            CreditCard: <React.Fragment><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></React.Fragment>,
+            Activity: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>,
+            Church: <React.Fragment><path d="M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z"/><path d="M12 7v2"/><path d="M11 8h2"/></React.Fragment>,
+            Hash: <React.Fragment><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></React.Fragment>,
+            Gift: <React.Fragment><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></React.Fragment>
         };
         return (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -165,13 +172,13 @@
         return (<button disabled={disabled} onClick={onClick} className={`flex items-center justify-center gap-2 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${v[variant]} ${s[size]} ${className}`}>{icon && <Icon name={icon} size={size==='sm'?14:18} />}{children}</button>);
     };
 
-    const Input = ({ label, type="text", value, onChange, placeholder, className="" }) => (<div className={className}>{label && <label className="block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1">{label}</label>}<input type={type} value={value} onChange={onChange} placeholder={placeholder} className="w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-brand-500 transition-all placeholder:text-slate-400" /></div>);
+    const Input = ({ label, type="text", value, onChange, placeholder, className="", ...props }) => (<div className={className}>{label && <label className="block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1">{label}</label>}<input type={type} value={value} onChange={onChange} placeholder={placeholder} className="w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-brand-500 transition-all placeholder:text-slate-400" {...props} /></div>);
     
     const Select = ({ label, value, onChange, children, className="" }) => (<div className={className}>{label && <label className="block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1">{label}</label>}<div className="relative"><select value={value} onChange={onChange} className="w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 pr-10 outline-none appearance-none focus:ring-2 focus:ring-brand-500">{children}</select><div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><Icon name="ChevronDown" size={16}/></div></div></div>);
     
     const Card = ({ children, className = "", onClick }) => (<div onClick={onClick} className={`bg-white rounded-2xl p-6 shadow-soft border border-slate-100 transition-all ${className}`}>{children}</div>);
     
-    const Badge = ({ children, type = 'default' }) => { const s = { default: "bg-slate-100 text-slate-600", success: "bg-emerald-100 text-emerald-700", warning: "bg-amber-100 text-amber-700", brand: "bg-brand-100 text-brand-700", blue: "bg-blue-100 text-blue-700", danger: "bg-red-100 text-red-700" }; return <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide ${s[type] || s.default}`}>{children}</span>; };
+    const Badge = ({ children, type = 'default', className="" }) => { const s = { default: "bg-slate-100 text-slate-600", success: "bg-emerald-100 text-emerald-700", warning: "bg-amber-100 text-amber-700", brand: "bg-brand-100 text-brand-700", blue: "bg-blue-100 text-blue-700", danger: "bg-red-100 text-red-700" }; return <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide ${s[type] || s.default} ${className}`}>{children}</span>; };
     
     const Modal = ({ isOpen, onClose, title, children }) => { 
         useEffect(() => { document.body.style.overflow = isOpen ? 'hidden' : 'unset'; return () => { document.body.style.overflow = 'unset'; }; }, [isOpen]); 
@@ -179,12 +186,33 @@
         return (<div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in"><div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col relative animate-enter"><div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white"><h3 className="font-extrabold text-xl text-slate-800 tracking-tight">{title}</h3><button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500"><Icon name="X" /></button></div><div className="p-6 overflow-y-auto custom-scrollbar">{children}</div></div></div>); 
     };
 
+    // --- NUEVO: MODAL DE CONFIRMACIÓN (FASE 2) ---
+    const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message }) => {
+        if (!isOpen) return null;
+        return (
+            <Modal isOpen={isOpen} onClose={onClose} title={title || "¿Estás seguro?"}>
+                <div className="space-y-6">
+                    <div className="flex gap-4">
+                        <div className="bg-red-100 p-3 rounded-full h-fit text-red-600"><Icon name="AlertTriangle" size={24}/></div>
+                        <div>
+                            <p className="text-slate-600 leading-relaxed text-sm">{message || "Esta acción no se puede deshacer. ¿Deseas continuar?"}</p>
+                        </div>
+                    </div>
+                    <div className="flex gap-3 justify-end pt-2">
+                        <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+                        <Button variant="danger" onClick={() => { onConfirm(); onClose(); }}>Confirmar</Button>
+                    </div>
+                </div>
+            </Modal>
+        );
+    };
+
     const DateFilter = ({ currentDate, onChange }) => {
         const months = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
         return (
             <div className="flex gap-2 mb-4 bg-white p-1 rounded-xl shadow-sm border border-slate-200 w-fit">
                 <button onClick={()=>{const d=new Date(currentDate);d.setMonth(d.getMonth()-1);onChange(d)}} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><Icon name="ChevronLeft" size={16}/></button>
-                <div className="px-4 py-2 font-bold text-slate-700 text-sm flex items-center">{months[currentDate.getMonth()]} {currentDate.getFullYear()}</div>
+                <div className="px-4 py-2 font-bold text-slate-700 text-sm flex items-center whitespace-nowrap">{months[currentDate.getMonth()]} {currentDate.getFullYear()}</div>
                 <button onClick={()=>{const d=new Date(currentDate);d.setMonth(d.getMonth()+1);onChange(d)}} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><Icon name="ChevronRight" size={16}/></button>
             </div>
         );
@@ -210,7 +238,7 @@
 
     window.Utils = { 
         ...window.Utils, 
-        Icon, Button, Input, Modal, Select, DateFilter, SmartSelect, ToastContainer, notify, 
+        Icon, Button, Input, Modal, ConfirmModal, Select, DateFilter, SmartSelect, ToastContainer, notify, 
         formatCurrency, formatDate, formatTime, getLocalDate, compressImage, Card, Badge, parseLocalDate
     };
 })();
