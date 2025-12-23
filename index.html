@@ -3,23 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Iglesia Conquistadores - CDS</title>
+    <title>Iglesia Conquistadores - Sistema de Gestión</title>
     
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2563eb">
+    <link rel="icon" type="image/png" href="icon.png"> 
     
-    <!-- Librerías Core -->
     <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
     <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
-    <!-- PDF y Utilidades -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     
-    <!-- Firebase (COMPAT) - NOTA: Se agregó messaging aquí abajo -->
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -39,10 +37,18 @@
                     boxShadow: {
                         'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
                         'glow': '0 0 15px rgba(37, 99, 235, 0.3)',
-                        'input': '0 2px 5px rgba(0,0,0,0.03)'
                     },
                     animation: {
                         'spin-slow': 'spin 8s linear infinite',
+                        'shake': 'shake 0.5s cubic-bezier(.36,.07,.19,.97) both',
+                    },
+                    keyframes: {
+                        shake: {
+                            '10%, 90%': { transform: 'translate3d(-1px, 0, 0)' },
+                            '20%, 80%': { transform: 'translate3d(2px, 0, 0)' },
+                            '30%, 50%, 70%': { transform: 'translate3d(-4px, 0, 0)' },
+                            '40%, 60%': { transform: 'translate3d(4px, 0, 0)' }
+                        }
                     }
                 }
             }
@@ -50,14 +56,41 @@
     </script>
     <style>
         body { background-color: #f1f5f9; -webkit-font-smoothing: antialiased; scroll-behavior: smooth; }
+        /* Ocultar Scrollbar pero permitir scroll */
         .hide-scroll::-webkit-scrollbar { display: none; }
-        .animate-enter { animation: enter 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; transform: translateY(20px); }
+        .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Animaciones Globales */
+        .animate-enter { animation: enter 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; transform: translateY(10px); }
         @keyframes enter { to { opacity: 1; transform: translateY(0); } }
-        .toast-enter { animation: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-        @keyframes toast-in { from { opacity: 0; transform: translateY(-20px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        
+        .fade-in { animation: fadeIn 0.3s ease-in forwards; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* Clases Utilitarias */
         .input-modern { @apply w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500 transition-all outline-none; }
         .label-modern { @apply block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1; }
+        
+        /* Estilos específicos para impresión/PDF */
+        @media print { .no-print { display: none !important; } }
     </style>
+
+    <script type="text/babel" src="src/Utils.js"></script>
+    <script type="text/babel" src="src/DataLogic.js"></script>
+    <script type="text/babel" src="src/NotificationLogic.js"></script> 
+    
+    <script type="text/babel" src="src/views/Landing.js"></script>
+    <script type="text/babel" src="src/views/GlobalCalendar.js"></script>
+    <script type="text/babel" src="src/views/EventDetails.js"></script>
+    <script type="text/babel" src="src/views/Dashboard.js"></script>
+    <script type="text/babel" src="src/views/Directory.js"></script>
+    <script type="text/babel" src="src/views/Finances.js"></script>
+    <script type="text/babel" src="src/views/Worship.js"></script>
+    <script type="text/babel" src="src/views/MinistryWithTasks.js"></script>
+    <script type="text/babel" src="src/views/Messaging.js"></script>
+    <script type="text/babel" src="src/views/Blog.js"></script>
+    <script type="text/babel" src="src/views/QuickActions.js"></script>
+    <script type="text/babel" src="src/views/Visits.js"></script>
 
     <script>
         const firebaseConfig = {
@@ -73,85 +106,71 @@
         window.auth = firebase.auth();
         window.googleProvider = new firebase.auth.GoogleAuthProvider();
         
-        // Registro del Service Worker
+        // Service Worker para PWA y Notificaciones
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./service-worker.js')
-                .then((registration) => {
-                    console.log('Service Worker registrado con éxito:', registration);
-                    
-                    // Conectar Firebase Messaging con el SW
+                .then((reg) => {
+                    console.log('SW Ok:', reg.scope);
                     try {
                         const messaging = firebase.messaging();
-                        messaging.useServiceWorker(registration);
-                    } catch (e) {
-                        console.log("Messaging no disponible en este navegador o contexto inseguro.");
-                    }
+                        messaging.useServiceWorker(reg);
+                    } catch (e) { console.log("Messaging no soportado en este entorno."); }
                 })
-                .catch((err) => console.log('Error registro SW:', err));
+                .catch((err) => console.log('SW Falló:', err));
             });
         }
     </script>
-
-    <!-- Carga de Módulos -->
-    <script type="text/babel" src="src/Utils.js"></script>
-    <script type="text/babel" src="src/DataLogic.js"></script>
-    <!-- IMPORTANTE: Lógica de Notificaciones -->
-    <script type="text/babel" src="src/NotificationLogic.js"></script> 
-    
-    <script type="text/babel" src="src/views/Landing.js"></script>
-    <script type="text/babel" src="src/views/GlobalCalendar.js"></script>
-    <script type="text/babel" src="src/views/EventDetails.js"></script>
-    <script type="text/babel" src="src/views/Dashboard.js"></script>
-    <script type="text/babel" src="src/views/Directory.js"></script>
-    <script type="text/babel" src="src/views/Finances.js"></script>
-    <script type="text/babel" src="src/views/Worship.js"></script>
-    <script type="text/babel" src="src/views/MinistryWithTasks.js"></script>
-    <script type="text/babel" src="src/views/Messaging.js"></script>
-    <script type="text/babel" src="src/views/Blog.js"></script>
-    <script type="text/babel" src="src/views/QuickActions.js"></script>
-    <script type="text/babel" src="src/views/Visits.js"></script>
 </head>
 <body>
     <div id="root"></div>
+
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useMemo } = React;
         const Utils = window.Utils || {};
         const { Icon, ToastContainer } = Utils;
         const DataLogic = window.DataLogic || {};
         const { useFirebaseListeners, addData, updateData, deleteData } = DataLogic;
         const Views = window.Views || {};
         
-        // Importación de TODAS las vistas
+        // Desestructuración de Vistas
         const { Landing, Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging, Blog, QuickActions, Visits } = Views;
 
-        const LoginScreen = ({ onLogin, onBack, loading, error }) => (
-            <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-                <div className="bg-white p-8 rounded-3xl shadow-soft max-w-sm w-full text-center relative">
-                    <button onClick={onBack} className="absolute top-4 left-4 text-slate-400 hover:text-slate-600"><Icon name="ChevronLeft"/></button>
-                    <div className="bg-brand-600 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-glow"><Icon name="Home" size={32}/></div>
-                    <h1 className="text-2xl font-extrabold text-slate-800">Acceso Líderes</h1>
-                    <p className="text-slate-500 mb-6 font-medium text-sm">Gestión Interna Conquistadores</p>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 font-medium">{error}</div>}
-                    <button onClick={onLogin} className="w-full bg-brand-600 text-white py-3.5 rounded-xl font-bold shadow-lg hover:bg-brand-700 transition-all flex items-center justify-center gap-2">
-                        <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5 bg-white rounded-full p-0.5"/>
+        // --- COMPONENTE LOGIN ---
+        const LoginScreen = ({ onLogin, onBack, error }) => (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 fade-in">
+                <div className="bg-white p-8 rounded-3xl shadow-soft max-w-sm w-full text-center relative border border-slate-100">
+                    <button onClick={onBack} className="absolute top-4 left-4 text-slate-400 hover:text-slate-600 transition-colors"><Icon name="ChevronLeft"/></button>
+                    <div className="bg-brand-600 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-glow">
+                        <Icon name="Home" size={32}/>
+                    </div>
+                    <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">Acceso Líderes</h1>
+                    <p className="text-slate-500 mb-8 font-medium text-sm">Gestión Interna Conquistadores</p>
+                    
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-xl text-xs mb-6 font-bold flex items-center gap-2 justify-center"><Icon name="AlertCircle" size={16}/> {error}</div>}
+                    
+                    <button onClick={onLogin} className="w-full bg-white text-slate-700 border border-slate-200 py-3.5 rounded-xl font-bold hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center justify-center gap-3 shadow-sm">
+                        <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5"/>
                         Ingresar con Google
                     </button>
                 </div>
             </div>
         );
 
+        // --- APP PRINCIPAL ---
         const App = () => {
-            const [viewMode, setViewMode] = useState('landing');
-            
+            // Estado de Navegación
+            const [viewMode, setViewMode] = useState('landing'); // 'landing', 'login', 'system'
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [sidebarOpen, setSidebarOpen] = useState(false);
+
+            // Estado de Usuario
             const [currentUser, setCurrentUser] = useState(null);
             const [userProfile, setUserProfile] = useState(null);
             const [loadingAuth, setLoadingAuth] = useState(true);
             const [authError, setAuthError] = useState(null);
-            const [activeTab, setActiveTab] = useState('dashboard');
-            const [sidebarOpen, setSidebarOpen] = useState(false);
 
-            // Datos
+            // Estado de Datos (Colecciones)
             const [members, setMembers] = useState([]);
             const [finances, setFinances] = useState([]);
             const [worship, setWorship] = useState([]);
@@ -162,23 +181,30 @@
             const [servers, setServers] = useState([]);
             const [messages, setMessages] = useState([]);
             const [posts, setPosts] = useState([]);
+            const [visits, setVisits] = useState([]); // Nueva colección
 
-            const setters = {
-                members: setMembers, finances: setFinances, worship: setWorship, songs: setSongs,
-                ebd: setEbd, youth: setYouth, tasks: setTasks, servers: setServers, messages: setMessages, posts: setPosts
-            };
-
+            // 1. AUTENTICACIÓN
             useEffect(() => {
                 const unsubscribe = window.auth.onAuthStateChanged(async (user) => {
                     if (user) {
                         setCurrentUser(user);
                         try {
+                            // Buscar perfil en base de datos
                             const q = window.db.collection('members').where('email', '==', user.email);
                             const snapshot = await q.get();
+                            
                             if (!snapshot.empty) {
-                                setUserProfile({ ...snapshot.docs[0].data(), id: snapshot.docs[0].id });
+                                // Usuario Encontrado
+                                const profile = { ...snapshot.docs[0].data(), id: snapshot.docs[0].id };
+                                setUserProfile(profile);
                                 setViewMode('system');
+                                
+                                // Pedir permiso notificaciones si es posible
+                                if (window.NotificationLogic) {
+                                    window.NotificationLogic.requestPermission(profile);
+                                }
                             } else {
+                                // Verificar si es el primer usuario (Admin Inicial)
                                 const checkEmpty = await window.db.collection('members').get();
                                 if(checkEmpty.empty) {
                                     const admin = { name: user.displayName, email: user.email, role: 'Pastor', ministry: 'General', photo: user.photoURL, status: 'Activo' };
@@ -186,78 +212,135 @@
                                     setUserProfile(admin);
                                     setViewMode('system');
                                 } else {
-                                    setAuthError("Tu email no está registrado en el sistema.");
+                                    setAuthError("Tu email no está registrado. Contacta al administrador.");
                                     setViewMode('login');
+                                    window.auth.signOut(); // Forzar salida si no tiene permiso
                                 }
                             }
-                        } catch(e) { setAuthError("Error de red"); }
-                    } else { 
-                        setCurrentUser(null); 
-                        setUserProfile(null); 
+                        } catch(e) { 
+                            console.error(e);
+                            setAuthError("Error de conexión al verificar usuario."); 
+                        }
+                    } else {
+                        setCurrentUser(null);
+                        setUserProfile(null);
                     }
                     setLoadingAuth(false);
                 });
                 return () => unsubscribe();
             }, []);
 
-            useFirebaseListeners(userProfile, setters);
+            // 2. CONEXIÓN DE DATOS OPTIMIZADA (MOTOR NUEVO)
+            // Aquí configuramos qué queremos escuchar y con qué límites
+            const listenersConfig = useMemo(() => ({
+                // Datos críticos (Traer todo o grandes cantidades)
+                members: setMembers,
+                songs: setSongs,
+                
+                // Datos con LÍMITES para rendimiento (Smart Queries)
+                finances: { setter: setFinances, orderBy: 'date', orderDir: 'desc', limit: 300 }, // Últimos 300 movs
+                messages: { setter: setMessages, orderBy: 'date', orderDir: 'desc', limit: 50 },  // Últimos 50 msgs
+                posts: { setter: setPosts, orderBy: 'date', orderDir: 'desc', limit: 20 },        // Últimos 20 posts
+                visits: { setter: setVisits, orderBy: 'createdAt', orderDir: 'desc', limit: 50 }, // Últimas 50 visitas
+                
+                // Eventos (Idealmente filtrar por fecha futura, por ahora traemos recientes)
+                worship: { setter: setWorship, orderBy: 'date', orderDir: 'asc', limit: 50 },
+                ebd: { setter: setEbd, orderBy: 'date', orderDir: 'asc', limit: 50 },
+                youth: { setter: setYouth, orderBy: 'date', orderDir: 'asc', limit: 50 },
+                servers: { setter: setServers, orderBy: 'date', orderDir: 'asc', limit: 50 },
+                tasks: { setter: setTasks, orderBy: 'dueDate', orderDir: 'asc', limit: 100 }
+            }), []);
 
-            const handleLogin = async () => { try { await window.auth.signInWithPopup(window.googleProvider); } catch(e) { setAuthError("Error Google"); } };
-            const handleLogout = () => { window.auth.signOut(); setViewMode('landing'); };
+            useFirebaseListeners(userProfile, listenersConfig);
 
-            if (loadingAuth) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse bg-slate-50">Cargando...</div>;
+            // Handlers
+            const handleLogin = async () => { 
+                setAuthError(null);
+                try { await window.auth.signInWithPopup(window.googleProvider); } 
+                catch(e) { setAuthError("No se pudo conectar con Google."); } 
+            };
+            
+            const handleLogout = () => { 
+                window.auth.signOut(); 
+                setViewMode('landing'); 
+                setUserProfile(null);
+            };
 
+            // RENDERIZADO
+            if (loadingAuth) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="w-10 h-10 border-4 border-brand-200 border-t-brand-600 rounded-full animate-spin"></div></div>;
+
+            // MODO PÚBLICO (LANDING)
             if (viewMode === 'landing') return <Landing onEnterSystem={() => setViewMode(currentUser ? 'system' : 'login')} />;
             
-            if (viewMode === 'login') return <LoginScreen onLogin={handleLogin} onBack={()=>setViewMode('landing')} loading={false} error={authError} />;
+            // MODO LOGIN
+            if (viewMode === 'login') return <LoginScreen onLogin={handleLogin} onBack={()=>setViewMode('landing')} error={authError} />;
 
+            // MODO SISTEMA (APP)
             const NavItem = ({ id, label, icon }) => (
-                <button onClick={() => { setActiveTab(id); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all mb-1 ${activeTab === id ? 'bg-brand-50 text-brand-600 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
-                    {Icon && <Icon name={icon} />} {label}
+                <button onClick={() => { setActiveTab(id); setSidebarOpen(false); }} 
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all mb-1 ${activeTab === id ? 'bg-brand-50 text-brand-600 shadow-sm' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`}>
+                    {Icon && <Icon name={icon} />} <span className="tracking-tight">{label}</span>
                 </button>
             );
 
             return (
                 <div className="flex h-screen bg-slate-50 overflow-hidden text-slate-900 font-sans">
                     {ToastContainer && <ToastContainer />}
+                    
+                    {/* SIDEBAR */}
                     <aside className={`fixed inset-y-0 left-0 z-40 w-72 bg-white border-r border-slate-100 transform transition-transform duration-300 md:relative md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                         <div className="p-6 flex flex-col h-full">
-                            <div className="flex items-center gap-3 mb-8"><div className="bg-brand-600 text-white p-2 rounded-xl shadow-glow">{Icon && <Icon name="Home"/>}</div><span className="font-extrabold text-xl tracking-tight text-slate-800">Conquistadores</span></div>
-                            <nav className="space-y-1 flex-1 overflow-y-auto hide-scroll">
+                            {/* Logo */}
+                            <div className="flex items-center gap-3 mb-8 px-2">
+                                <div className="bg-brand-600 text-white p-2 rounded-xl shadow-glow"><Icon name="Home"/></div>
+                                <span className="font-extrabold text-xl tracking-tight text-slate-800">Conquistadores</span>
+                            </div>
+                            
+                            {/* Menú Scrollable */}
+                            <nav className="space-y-1 flex-1 overflow-y-auto hide-scroll pr-2">
                                 <NavItem id="dashboard" icon="Home" label="Inicio" />
                                 <NavItem id="calendar" icon="Calendar" label="Calendario" />
                                 <NavItem id="blog" icon="Book" label="Devocionales" />
-                                <div className="mt-6 mb-2 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Ministerios</div>
+                                
+                                <div className="mt-6 mb-2 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ministerios</div>
                                 {(userProfile.role === 'Pastor' || userProfile.ministry === 'Alabanza') && <NavItem id="worship" icon="Music" label="Alabanza" />}
                                 {(userProfile.role === 'Pastor' || userProfile.ministry === 'Servidores' || userProfile.ministry === 'General') && <NavItem id="servers" icon="Hand" label="Servidores" />}
                                 {(userProfile.role === 'Pastor' || userProfile.ministry === 'EBD') && <NavItem id="ebd" icon="BookOpen" label="Escuela Bíblica" />}
                                 {(userProfile.role === 'Pastor' || userProfile.ministry === 'Jóvenes') && <NavItem id="youth" icon="Smile" label="Jóvenes" />}
-                                <div className="mt-6 mb-2 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Gestión</div>
+                                
+                                <div className="mt-6 mb-2 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Gestión</div>
                                 {userProfile.role === 'Pastor' && <NavItem id="finances" icon="Wallet" label="Tesorería" />}
                                 <NavItem id="members" icon="Users" label="Directorio" />
-                                {['Pastor', 'Líder', 'Servidor'].includes(userProfile.role) && <NavItem id="visits" icon="MapPin" label="Visitas Pastoral" />}
+                                {['Pastor', 'Líder', 'Servidor'].includes(userProfile.role) && <NavItem id="visits" icon="MapPin" label="Pastoral" />}
                                 <NavItem id="messages" icon="Mail" label="Mensajería" />
                             </nav>
                             
-                            {/* PERFIL Y BOTÓN DE NOTIFICACIONES */}
-                            <div className="mt-auto pt-6 border-t border-slate-100 flex flex-col gap-3">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3 overflow-hidden"><img src={userProfile.photo} className="w-10 h-10 rounded-full bg-slate-200 object-cover"/><div className="leading-tight overflow-hidden"><p className="font-bold text-sm text-slate-800 truncate w-24">{userProfile.name}</p><p className="text-[10px] text-slate-500 uppercase font-bold">{userProfile.role}</p></div></div>
-                                    <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors p-2">{Icon && <Icon name="LogOut"/>}</button>
+                            {/* Perfil Footer */}
+                            <div className="mt-auto pt-4 border-t border-slate-100 flex flex-col gap-3">
+                                <div className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 transition-colors">
+                                    <div className="flex items-center gap-3 overflow-hidden">
+                                        <img src={userProfile.photo} className="w-9 h-9 rounded-full bg-slate-200 object-cover border border-slate-100"/>
+                                        <div className="leading-tight overflow-hidden">
+                                            <p className="font-bold text-xs text-slate-800 truncate w-24">{userProfile.name}</p>
+                                            <p className="text-[9px] text-slate-500 uppercase font-bold">{userProfile.role}</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors"><Icon name="LogOut" size={18}/></button>
                                 </div>
-                                
-                                <button 
-                                    onClick={() => window.NotificationLogic && window.NotificationLogic.requestPermission(userProfile)} 
-                                    className="w-full bg-brand-50 text-brand-600 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-brand-100 hover:bg-brand-100 transition-all active:scale-95 shadow-sm"
-                                >
-                                    {Icon && <Icon name="Bell" size={14}/>} Activar Notificaciones
-                                </button>
                             </div>
                         </div>
                     </aside>
-                    <main className="flex-1 flex flex-col h-screen overflow-hidden relative w-full">
-                        <header className="md:hidden bg-white/80 backdrop-blur p-4 flex justify-between items-center border-b border-slate-100 sticky top-0 z-20"><span className="font-bold text-lg text-slate-800">Conquistadores</span><button onClick={()=>setSidebarOpen(true)} className="text-slate-600">{Icon && <Icon name="Menu"/>}</button></header>
-                        <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24">
+
+                    {/* MAIN CONTENT */}
+                    <main className="flex-1 flex flex-col h-screen overflow-hidden relative w-full bg-[#f8fafc]">
+                        {/* Mobile Header */}
+                        <header className="md:hidden bg-white/80 backdrop-blur p-4 flex justify-between items-center border-b border-slate-100 sticky top-0 z-20">
+                            <span className="font-bold text-lg text-slate-800">Conquistadores</span>
+                            <button onClick={()=>setSidebarOpen(true)} className="text-slate-600"><Icon name="Menu"/></button>
+                        </header>
+                        
+                        {/* Scrollable Area */}
+                        <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 scroll-smooth">
                             <div className="max-w-6xl mx-auto h-full">
                                 {activeTab === 'dashboard' && Dashboard && <Dashboard userProfile={userProfile} worship={worship} servers={servers} tasks={tasks} messages={messages} ebd={ebd} youth={youth} updateData={updateData} setActiveTab={setActiveTab} />}
                                 {activeTab === 'members' && Directory && <Directory members={members} addData={addData} updateData={updateData} deleteData={deleteData} userProfile={userProfile} setActiveTab={setActiveTab} />}
@@ -273,11 +356,14 @@
                             </div>
                         </div>
                     </main>
-                    {QuickActions && <QuickActions userProfile={userProfile} setActiveTab={setActiveTab} />}
+
+                    {/* Quick Actions & Mobile Overlay */}
+                    {QuickActions && viewMode === 'system' && <QuickActions userProfile={userProfile} setActiveTab={setActiveTab} />}
                     {sidebarOpen && <div className="fixed inset-0 bg-slate-900/50 z-30 md:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)}></div>}
                 </div>
             );
         };
+
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
