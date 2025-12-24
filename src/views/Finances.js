@@ -583,8 +583,9 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                 {/* VISTA 3: LISTADO */}
                 {tabView === 'list' && (
                     <div className="animate-enter space-y-4">
-                        {monthlyData.length === 0 ? <div className="text-center py-20 text-slate-500">Sin movimientos.</div> : monthlyData.map(f => (
-                            <div key={f.id} className="bg-white/5 border border-white/5 hover:border-white/20 p-4 rounded-2xl flex items-center gap-4 transition-all group">
+                        {monthlyData.length === 0 ? <div className="text-center py-20 text-slate-500">Sin movimientos.</div> : monthlyData.map((f, index) => (
+                            // CAMBIO: Agregamos index como fallback en la key para evitar error de "null key"
+                            <div key={f.id || index} className="bg-white/5 border border-white/5 hover:border-white/20 p-4 rounded-2xl flex items-center gap-4 transition-all group">
                                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0 ${f.type==='Culto'?'bg-purple-500/20 text-purple-400':(safeNum(f.amount)>0?'bg-emerald-500/20 text-emerald-400':'bg-rose-500/20 text-rose-400')}`}><Icon name={f.type==='Culto'?'Church':(safeNum(f.amount)>0?'TrendingUp':'ShoppingBag')}/></div>
                                 <div className="flex-1 min-w-0">
                                     <div className="flex justify-between"><h4 className="font-bold text-white truncate">{f.type==='Culto'?'Culto General':f.category}</h4><span className={`font-mono font-bold ${safeNum(f.amount)>0?'text-emerald-400':'text-rose-400'} ${blurClass}`}>{formatCurrency(f.amount)}</span></div>
@@ -593,7 +594,9 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button onClick={()=>handleEdit(f)} className="p-2 bg-white/10 rounded-lg hover:bg-white/20"><Icon name="Edit" size={16}/></button>
                                     <button onClick={(e)=>{e.stopPropagation(); handleExportPDF(f)}} className="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg hover:bg-indigo-500/30"><Icon name="Printer" size={16}/></button>
-                                    <button onClick={()=>{setSelectedIds([f.id]); handleDelete()}} className="p-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30"><Icon name="Trash" size={16}/></button>
+                                    
+                                    {/* CAMBIO IMPORTANTE AQUÍ ABAJO: handleDelete -> handleBulkDelete */}
+                                    <button onClick={()=>{setSelectedIds([f.id]); handleBulkDelete()}} className="p-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30"><Icon name="Trash" size={16}/></button>
                                 </div>
                             </div>
                         ))}
@@ -693,9 +696,11 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                                     <Button size="sm" onClick={handleAddEnvelope} disabled={!tempEnvelope.amount} className="mt-1">Agregar Sobre</Button>
                                 </div>
 
+                                {/* Lista de Sobres Cargados */}
                                 <div className="space-y-2">
                                     {form.titheEnvelopes.map((env, idx) => (
-                                        <div key={idx} className="flex justify-between items-center bg-white px-3 py-2 rounded-lg border border-indigo-100 text-sm shadow-sm">
+                                        // CAMBIO: Usamos env.id como key principal, idx como respaldo
+                                        <div key={env.id || idx} className="flex justify-between items-center bg-white px-3 py-2 rounded-lg border border-indigo-100 text-sm shadow-sm">
                                             <div>
                                                 <span className="font-bold text-indigo-900 block">{env.family || 'Anónimo'} <span className="text-[9px] text-slate-400 font-normal bg-slate-100 px-1 rounded">{env.method}</span></span>
                                                 <span className="text-xs text-slate-500">{env.prayer}</span>
