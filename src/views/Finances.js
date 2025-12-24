@@ -130,15 +130,24 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     }, [finances, currentDate, searchTerm, filterType]);
 
     // 2. Totales Mensuales y Diezmo Nacional (10%)
-        const stats = useMemo(() => {
-            let incomes = 0, expenses = 0;
-            monthlyData.forEach(f => {
-                const val = safeNum(f.total || f.amount);
-                if (val > 0) incomes += val; else expenses += Math.abs(val);
-            });
-            const nationalTithe = incomes * 0.10;
-            return { incomes, expenses, net: incomes - expenses, nationalTithe };
-        }, [monthlyData]);
+    // UNIFICADO: Usamos 'stats' para todo
+    const stats = useMemo(() => {
+        let incomes = 0, expenses = 0;
+        
+        monthlyData.forEach(f => {
+            const val = safeNum(f.total || f.amount);
+            if (val > 0) {
+                incomes += val;
+            } else {
+                expenses += Math.abs(val);
+            }
+        });
+
+        // Diezmo para Asamblea (10% de los ingresos brutos)
+        const nationalTithe = incomes * 0.10;
+
+        return { incomes, expenses, net: incomes - expenses, nationalTithe };
+    }, [monthlyData]);
 
     // 3. Saldos Globales (Caja vs Banco)
     const balances = useMemo(() => {
@@ -257,30 +266,22 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         // Limpiar instancias previas
         Object.values(chartInstances.current).forEach(c => c && c.destroy());
 
-        
         // 1. Gráfico de Proyección (Stats)
-                if (chartRefs.projection.current && tabView === 'stats') {
-                    const ctx = chartRefs.projection.current.getContext('2d');
-                    const gradient = ctx.createLinearGradient(0, 0, 0, 400);
-                    gradient.addColorStop(0, 'rgba(99, 102, 241, 0.5)'); 
-                    gradient.addColorStop(1, 'rgba(99, 102, 241, 0.0)');
-                    
-                    chartInstances.current.projection = new Chart(chartRefs.projection.current, {
-                        type: 'line', 
-                        data: { 
-                            labels: ['Inicio', 'Hoy', 'Fin'], 
-                            // CORRECCIÓN AQUÍ: Usamos 'stats.net'
-                            datasets: [{ 
-                                label: 'Proyección', 
-                                data: [0, stats.net, chartData.projection?.end || stats.net], 
-                                borderColor: '#818cf8', 
-                                fill: true, 
-                                backgroundColor: gradient 
-                            }] 
-                        },
-                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-                    });
-                }
+        if (chartRefs.projection.current && tabView === 'stats') {
+            const ctx = chartRefs.projection.current.getContext('2d');
+            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+            gradient.addColorStop(0, 'rgba(99, 102, 241, 0.5)'); gradient.addColorStop(1, 'rgba(99, 102, 241, 0.0)');
+            
+            chartInstances.current.projection = new Chart(chartRefs.projection.current, {
+                type: 'line', 
+                data: { 
+                    labels: ['Inicio', 'Hoy', 'Fin'], 
+                    // SOLUCIÓN: Usamos 'stats.net'
+                    datasets: [{ label: 'Proyección', data: [0, stats.net, chartData.projection?.end || stats.net], borderColor: '#818cf8', fill: true, backgroundColor: gradient }] 
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+        }
 
         // 2. Gráfico de Torta (Stats)
         if (chartRefs.breakdown.current && tabView === 'stats') {
@@ -304,12 +305,11 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             });
         }
         return () => Object.values(chartInstances.current).forEach(c => c && c.destroy());
-    }, [chartData, tabView, stats]); // Dependencia cambiada de monthTotals a stats
+    }, [chartData, tabView, stats]); 
 
-    // --- LÓGICA DE PIN Y BLOQUEO (FUNCION DEFINIDA ANTES DE USAR) ---
+    // --- LÓGICA DE PIN Y BLOQUEO (DEFINIDA AQUÍ PARA EVITAR ERRORES) ---
     
-    // Función para manejar el clic fuera (definida antes del return)
-    // 1. DEFINIR LA FUNCIÓN AQUÍ (Antes del return)
+    // Función para manejar el clic fuera
     const handleBackgroundClick = () => {
         if (isLocked && pinInputRef.current) {
             pinInputRef.current.focus();
@@ -339,13 +339,31 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     const toggleSelect = (id) => { if (selectedIds.includes(id)) setSelectedIds(prev => prev.filter(i => i !== id)); else setSelectedIds(prev => [...prev, id]); };
     const selectAll = () => { if (selectedIds.length === monthlyData.length) setSelectedIds([]); else setSelectedIds(monthlyData.map(d => d.id)); };
     
-    const handleBulkDelete = async () => {
-        if(!confirm(`¿ELIMINAR ${selectedIds.length} ELEMENTOS?`)) return;
-        const batch = window.db.batch();
-        selectedIds.forEach(id => batch.delete(window.db.collection('finances').doc(id)));
-        await batch.commit();
-        setSelectedIds([]);
-        Utils.notify("Eliminados correctamente");
+    // --- BORRADO CORREGIDO ---
+    const handleDelete = async (idDirecto = null) => {
+        const itemsToDelete = idDirecto ? [idDirecto] : selectedIds;
+        if (itemsToDelete.length === 0) return;
+        
+        if(!confirm(`¿Eliminar ${itemsToDelete.length} registro(s)?`)) return;
+        
+        try {
+            const batch = window.db.batch();
+            itemsToDelete.forEach(docId => batch.delete(window.db.collection('finances').doc(docId)));
+            await batch.commit();
+            setSelectedIds([]);
+            Utils.notify("Eliminado correctamente");
+        } catch (e) { 
+            console.error(e); 
+            Utils.notify("Error al eliminar", "error"); 
+        }
+    };
+
+    const handleBulkDelete = () => handleDelete(); 
+
+    // --- EDICIÓN CORREGIDA ---
+    const handleEdit = (item) => {
+        setForm({ ...initialForm, ...item, titheEnvelopes: item.titheEnvelopes || [] });
+        setIsModalOpen(true);
     };
 
     const handleImage = async (e) => {
@@ -360,108 +378,40 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         } catch (error) { Utils.notify("Error imagen", "error"); } finally { setIsUploading(false); }
     };
 
-    // ESTA ES LA FUNCIÓN QUE TE FALTA PARA BORRAR MOVIMIENTOS
-    const handleDelete = async (idDirecto = null) => {
-        // Si recibimos un ID directo (clic en el tachito), borramos ese.
-        // Si no, borramos los que estén seleccionados con el checkbox.
-        const itemsToDelete = idDirecto ? [idDirecto] : selectedIds;
-
-        if (itemsToDelete.length === 0) return;
-        
-        // Confirmación simple
-        if(!confirm(`¿Eliminar ${itemsToDelete.length} registro(s)?`)) return;
-        
-        try {
-            const batch = window.db.batch();
-            itemsToDelete.forEach(docId => {
-                // Preparamos la eliminación en la base de datos
-                const ref = window.db.collection('finances').doc(docId);
-                batch.delete(ref);
-            });
-            
-            // Ejecutamos el borrado
-            await batch.commit();
-            
-            setSelectedIds([]); // Limpiamos la selección
-            Utils.notify("Eliminado correctamente");
-        } catch (e) {
-            console.error("Error al borrar:", e);
-            Utils.notify("Error al eliminar", "error");
-        }
-    };
-
-    // --- SAVE LOGIC REESCRITA (OFRENDAS + SOBRES) ---
     const handleSave = async () => {
-        // Validación Básica
         if (!form.date) return Utils.notify("Falta fecha", "error");
-
         let payload = { ...form };
         let totalAmount = 0;
 
         if (form.type === 'Culto') {
-            // 1. Sumar Sobres por método
-            let tithesC = 0;
-            let tithesT = 0;
-            
-            // Recorrer cada sobre y sumar según si es Efectivo o Banco
-            form.titheEnvelopes.forEach(e => {
-                if (e.method === 'Banco') tithesT += safeNum(e.amount);
-                else tithesC += safeNum(e.amount);
-            });
-
-            // 2. Sumar Ofrendas Sueltas
+            let tithesC = 0, tithesT = 0;
+            form.titheEnvelopes.forEach(e => { if (e.method === 'Banco') tithesT += safeNum(e.amount); else tithesC += safeNum(e.amount); });
             const offC = safeNum(form.offeringsCash);
             const offT = safeNum(form.offeringsTransfer);
-
-            // 3. Totales Calculados
-            payload.tithesCash = tithesC;
-            payload.tithesTransfer = tithesT;
-            payload.offeringsCash = offC;
-            payload.offeringsTransfer = offT;
-            
-            // Total Absoluto (Caja + Banco)
             totalAmount = tithesC + tithesT + offC + offT;
             
             if (totalAmount === 0) return Utils.notify("El total no puede ser 0", "error");
-            
-            payload.total = totalAmount; // Para compatibilidad
-            payload.amount = totalAmount; // Para cálculos genéricos
-            payload.category = 'Culto General';
-            payload.method = 'Mixto'; 
-        
+            payload.tithesCash = tithesC; payload.tithesTransfer = tithesT; payload.offeringsCash = offC; payload.offeringsTransfer = offT;
+            payload.total = totalAmount; payload.amount = totalAmount; payload.category = 'Culto General'; payload.method = 'Mixto'; 
         } else if (form.type === 'Transferencia') {
-            // Lógica de movimiento visual (no afecta balance global pero sí fondos)
             totalAmount = safeNum(form.amount);
             if (!form.toFund) return Utils.notify("Selecciona destino", "error");
-            payload.category = `Transf: ${form.fromFund} -> ${form.toFund}`; // No guardamos category como ID
-            payload.amount = 0; 
+            payload.category = `Transf: ${form.fromFund} -> ${form.toFund}`; payload.amount = 0; 
         } else {
-            // Gasto o Ingreso Vario
             totalAmount = safeNum(form.amount);
             if (totalAmount === 0) return Utils.notify("Monto requerido", "error");
-            
-            // Si es gasto, guardar negativo
             payload.amount = form.type === 'Gasto' ? -Math.abs(totalAmount) : Math.abs(totalAmount);
             payload.total = payload.amount;
         }
 
         try {
-            if (form.id) {
-                // Asegurarse de que updateData viene de props
-                await updateData('finances', form.id, payload);
-            } else {
-                await addData('finances', payload);
-            }
-            setIsModalOpen(false);
-            setForm(initialForm);
-            Utils.notify("Operación Guardada");
-        } catch (e) {
-            console.error(e);
-            Utils.notify("Error al guardar: " + e.message, "error");
-        }
+            if (form.id) await updateData('finances', form.id, payload);
+            else await addData('finances', payload);
+            setIsModalOpen(false); setForm(initialForm); Utils.notify("Operación Guardada");
+        } catch (e) { console.error(e); Utils.notify("Error al guardar", "error"); }
     };
 
-    // --- FONDOS (CRUD) ---
+    // --- FONDOS ---
     const handleSaveGoal = () => {
         let newGoals;
         const gData = { ...goalForm, currentSaved: safeNum(goalForm.currentSaved) };
@@ -482,7 +432,6 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     const getGoalProgress = (goal) => {
         const target = safeNum(goal.amount);
         let current = safeNum(goal.currentSaved); 
-        // Aquí podrías agregar lógica para sumar movimientos automáticos si quisieras
         const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
         return { current, target, pct };
     };
@@ -490,23 +439,11 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     // --- SUB-HANDLERS ---
     const handleAddEnvelope = () => {
         if (!tempEnvelope.amount) return;
-        setForm(prev => ({
-            ...prev,
-            titheEnvelopes: [...prev.titheEnvelopes, { ...tempEnvelope, id: Date.now() }]
-        }));
+        setForm(prev => ({ ...prev, titheEnvelopes: [...prev.titheEnvelopes, { ...tempEnvelope, id: Date.now() }] }));
         setTempEnvelope({ family: '', amount: '', prayer: '', method: 'Efectivo' });
     };
-
-    const handleEditEnvelope = (idx, field, value) => {
-        const updated = [...form.titheEnvelopes];
-        updated[idx] = { ...updated[idx], [field]: value };
-        setForm(prev => ({ ...prev, titheEnvelopes: updated }));
-    };
-
-    const removeEnvelope = (idx) => {
-        setForm(prev => ({ ...prev, titheEnvelopes: prev.titheEnvelopes.filter((_, i) => i !== idx) }));
-    };
-
+    const removeEnvelope = (idx) => setForm(prev => ({ ...prev, titheEnvelopes: prev.titheEnvelopes.filter((_, i) => i !== idx) }));
+    
     const handleExportPDF = (item) => {
         setPdfData(item);
         setTimeout(async () => {
@@ -515,13 +452,11 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             el.style.display = 'none';
         }, 500);
     };
-
     // --- RENDER ---
     
-    // 1. PANTALLA DE BLOQUEO (Con botón de volver)
+    // 1. PANTALLA DE BLOQUEO
     if (isLocked) return (
         <div onClick={handleBackgroundClick} className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050511] animate-enter cursor-pointer">
-            {/* Botón de Emergencia para Salir */}
             <button onClick={() => setMainTab && setMainTab('dashboard')} className="absolute top-6 left-6 text-slate-400 flex items-center gap-2 hover:text-white transition-colors z-50">
                 <Icon name="ChevronLeft"/> Volver al Inicio
             </button>
@@ -547,7 +482,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         </div>
     );
 
-    // 2. DASHBOARD PRINCIPAL
+    // 2. INTERFAZ PRINCIPAL
     return (
         <div className="min-h-screen bg-[#020617] text-slate-200 font-sans -m-4 sm:-m-8 pb-32 relative overflow-hidden selection:bg-indigo-500/30">
             <div className="fixed top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-indigo-600/10 blur-[150px] pointer-events-none"></div>
@@ -560,6 +495,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                         <div><h2 className="text-2xl font-black text-white tracking-tight">Tesoreria</h2><p className="text-slate-400 text-sm font-medium">Gestión Integral</p></div>
                         <button onClick={()=>setShowBalance(!showBalance)} className="ml-2 p-2 rounded-full hover:bg-white/5 text-slate-500 hover:text-white"><Icon name={showBalance?"Eye":"EyeOff"} size={18}/></button>
                     </div>
+                    
                     <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto bg-white/5 p-1.5 rounded-2xl border border-white/10 backdrop-blur-md">
                         <div className="text-slate-300 px-2"><DateFilter currentDate={currentDate} onChange={setCurrentDate} /></div>
                         <div className="w-px h-6 bg-white/10 mx-1"></div>
@@ -610,11 +546,10 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                     </div>
                 )}
 
-                {/* VISTA 3: LISTADO */}
+                {/* VISTA 3: LISTADO (BOTONES CORREGIDOS) */}
                 {tabView === 'list' && (
                     <div className="animate-enter space-y-4">
                         {monthlyData.length === 0 ? <div className="text-center py-20 text-slate-500">Sin movimientos.</div> : monthlyData.map((f, index) => (
-                            // CAMBIO: Agregamos index como fallback en la key para evitar error de "null key"
                             <div key={f.id || index} className="bg-white/5 border border-white/5 hover:border-white/20 p-4 rounded-2xl flex items-center gap-4 transition-all group">
                                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0 ${f.type==='Culto'?'bg-purple-500/20 text-purple-400':(safeNum(f.amount)>0?'bg-emerald-500/20 text-emerald-400':'bg-rose-500/20 text-rose-400')}`}><Icon name={f.type==='Culto'?'Church':(safeNum(f.amount)>0?'TrendingUp':'ShoppingBag')}/></div>
                                 <div className="flex-1 min-w-0">
@@ -622,18 +557,21 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                                     <div className="flex justify-between mt-1 text-xs text-slate-500"><span>{formatDate(f.date)} • {f.method}</span><span className="italic truncate max-w-[150px]">{f.notes}</span></div>
                                 </div>
                                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    {/* Botón Editar */}
                                     <button onClick={()=>handleEdit(f)} className="p-2 bg-white/10 rounded-lg hover:bg-white/20"><Icon name="Edit" size={16}/></button>
+                                    
+                                    {/* Botón PDF */}
                                     <button onClick={(e)=>{e.stopPropagation(); handleExportPDF(f)}} className="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg hover:bg-indigo-500/30"><Icon name="Printer" size={16}/></button>
                                     
-                                    {/* CAMBIO IMPORTANTE AQUÍ ABAJO: handleDelete -> handleBulkDelete */}
-                                    <button onClick={()=>{setSelectedIds([f.id]); handleBulkDelete()}} className="p-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30"><Icon name="Trash" size={16}/></button>
+                                    {/* Botón Eliminar CORREGIDO */}
+                                    <button onClick={(e)=>{e.stopPropagation(); handleDelete(f.id)}} className="p-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30"><Icon name="Trash" size={16}/></button>
                                 </div>
                             </div>
                         ))}
                     </div>
                 )}
 
-                {/* VISTA 4: DIEZMANTES (Mejorada) */}
+                {/* VISTA 4: DIEZMANTES */}
                 {tabView === 'tithers' && (
                     <div className="animate-enter space-y-6">
                         <div className="flex justify-end gap-2">
@@ -655,16 +593,14 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                                         </div>
                                         <div className="text-right"><span className={`block font-mono font-bold text-emerald-400 ${blurClass}`}>{formatCurrency(t.total)}</span><span className="text-[10px] bg-white/10 px-2 py-0.5 rounded text-slate-300">{t.count} veces</span></div>
                                     </div>
-                                    {t.requests.length > 0 && (
-                                        <div className="bg-black/20 p-3 rounded-xl mt-2"><p className="text-[10px] font-bold text-indigo-300 uppercase mb-1">Últimas Peticiones</p>{t.requests.slice(-2).map((r, ri) => <p key={ri} className="text-xs text-slate-300 truncate">• {r.text}</p>)}</div>
-                                    )}
+                                    {t.requests.length > 0 && (<div className="bg-black/20 p-3 rounded-xl mt-2"><p className="text-[10px] font-bold text-indigo-300 uppercase mb-1">Últimas Peticiones</p>{t.requests.slice(-2).map((r, ri) => <p key={ri} className="text-xs text-slate-300 truncate">• {r.text}</p>)}</div>)}
                                 </div>
                             ))}
                         </div>
                     </div>
                 )}
 
-                {/* VISTA 5: FONDOS (Mejorada) */}
+                {/* VISTA 5: FONDOS */}
                 {tabView === 'funds' && (
                     <div className="animate-enter">
                         <div className="flex justify-end mb-6"><Button onClick={()=>setIsGoalModalOpen(true)} icon="Plus">Crear Fondo</Button></div>
@@ -693,7 +629,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                 )}
             </div>
 
-            {/* MODAL REGISTRO (CON SOBRES Y OFRENDAS) */}
+            {/* MODAL REGISTRO */}
             <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Registrar Operación">
                 <div className="space-y-5 max-h-[75vh] overflow-y-auto pr-1 pb-4">
                     <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1 rounded-xl">
@@ -703,7 +639,6 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
 
                     {form.type === 'Culto' ? (
                         <div className="space-y-6">
-                            {/* Ofrendas Sueltas */}
                             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
                                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2"><Icon name="Gift" size={14}/> Ofrendas Sueltas</h4>
                                 <div className="grid grid-cols-2 gap-4">
@@ -711,11 +646,8 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                                     <Input label="Digital / Banco" type="number" placeholder="$0" value={form.offeringsTransfer} onChange={e => setForm({ ...form, offeringsTransfer: e.target.value })} />
                                 </div>
                             </div>
-
-                            {/* Sobres de Diezmo */}
                             <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100">
                                 <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2"><Icon name="Mail" size={14}/> Sobres de Diezmo</h4>
-                                
                                 <div className="flex flex-col gap-2 mb-4 bg-white p-3 rounded-xl shadow-sm border border-indigo-100">
                                     <Input placeholder="Familia (ej: Perez Garcia)" value={tempEnvelope.family} onChange={e => setTempEnvelope({ ...tempEnvelope, family: e.target.value })} className="text-sm font-bold" />
                                     <div className="flex gap-2">
@@ -725,20 +657,11 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                                     <Input placeholder="Petición..." value={tempEnvelope.prayer} onChange={e => setTempEnvelope({ ...tempEnvelope, prayer: e.target.value })} className="text-xs" />
                                     <Button size="sm" onClick={handleAddEnvelope} disabled={!tempEnvelope.amount} className="mt-1">Agregar Sobre</Button>
                                 </div>
-
-                                {/* Lista de Sobres Cargados */}
                                 <div className="space-y-2">
                                     {form.titheEnvelopes.map((env, idx) => (
-                                        // CAMBIO: Usamos env.id como key principal, idx como respaldo
                                         <div key={env.id || idx} className="flex justify-between items-center bg-white px-3 py-2 rounded-lg border border-indigo-100 text-sm shadow-sm">
-                                            <div>
-                                                <span className="font-bold text-indigo-900 block">{env.family || 'Anónimo'} <span className="text-[9px] text-slate-400 font-normal bg-slate-100 px-1 rounded">{env.method}</span></span>
-                                                <span className="text-xs text-slate-500">{env.prayer}</span>
-                                            </div>
-                                            <div className="flex items-center gap-3">
-                                                <span className="font-mono font-bold text-slate-700">{formatCurrency(env.amount)}</span>
-                                                <button onClick={() => removeEnvelope(idx)} className="text-red-400 hover:text-red-600"><Icon name="X" size={14} /></button>
-                                            </div>
+                                            <div><span className="font-bold text-indigo-900 block">{env.family || 'Anónimo'} <span className="text-[9px] text-slate-400 font-normal bg-slate-100 px-1 rounded">{env.method}</span></span><span className="text-xs text-slate-500">{env.prayer}</span></div>
+                                            <div className="flex items-center gap-3"><span className="font-mono font-bold text-slate-700">{formatCurrency(env.amount)}</span><button onClick={() => removeEnvelope(idx)} className="text-red-400 hover:text-red-600"><Icon name="X" size={14} /></button></div>
                                         </div>
                                     ))}
                                     {form.titheEnvelopes.length === 0 && <p className="text-center text-xs text-indigo-300 italic">No hay sobres cargados aún.</p>}
@@ -754,13 +677,11 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                             <SmartSelect label="Categoría" options={categories} value={form.category} onChange={v => setForm({ ...form, category: v })} />
                         </>
                     )}
-                    
                     <Input label="Notas / Detalles" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
                     <Button className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-xl mt-4" onClick={handleSave} disabled={isUploading}>{isUploading ? 'Subiendo...' : 'Guardar Operación'}</Button>
                 </div>
             </Modal>
 
-            {/* MODAL FONDOS */}
             <Modal isOpen={isGoalModalOpen} onClose={()=>setIsGoalModalOpen(false)} title="Gestión de Fondo">
                 <div className="space-y-5">
                     <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl">
@@ -778,7 +699,6 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                 </div>
             </Modal>
 
-            {/* PDF HIDDEN */}
             {pdfData && <div ref={printRef} style={{display:'none',width:'100mm',background:'white',padding:'30px',color:'#1e293b'}}>
                 <div style={{background:'#4f46e5',height:'5px',marginBottom:'20px'}}></div>
                 <h1 style={{fontSize:'18px',fontWeight:'900',color:'#4f46e5'}}>CONQUISTADORES</h1>
