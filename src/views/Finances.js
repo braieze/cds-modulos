@@ -1,68 +1,86 @@
 window.Views = window.Views || {};
 
 window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfile, setActiveTab: setMainTab }) => {
+    // 1. HOOKS Y UTILIDADES
     const { useState, useMemo, useEffect, useRef } = React;
     const Utils = window.Utils || {};
-    const { Button, Modal, Input, Select, DateFilter, formatCurrency, formatDate, Icon, SmartSelect, Badge } = Utils;
+    const { Button, Modal, Input, Select, DateFilter, formatCurrency, formatDate, Icon, SmartSelect, Badge, compressImage } = Utils;
 
-    // --- ESTADOS ---
+    // --- ESTADOS PRINCIPALES ---
     const [currentDate, setCurrentDate] = useState(new Date());
-    const [tabView, setTabView] = useState('dashboard');
+    const [tabView, setTabView] = useState('dashboard'); // dashboard, list, stats, tithers, funds
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     
-    // Privacy & UX
+    // UI States (Privacidad, Buscador, Filtros)
     const [showBalance, setShowBalance] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterType, setFilterType] = useState('all');
     const [expandedId, setExpandedId] = useState(null);
     const [selectedIds, setSelectedIds] = useState([]);
+    const [titherFilter, setTitherFilter] = useState('month'); // Filtro para diezmantes
 
-    // Seguridad PIN (ACTUALIZADO A 2367)
+    // SEGURIDAD PIN (CLAVE 2367)
     const [isLocked, setIsLocked] = useState(true);
     const [pinInput, setPinInput] = useState('');
     const [errorPin, setErrorPin] = useState(false);
     const pinInputRef = useRef(null);
 
-    // --- FORMULARIO PRINCIPAL ---
+    // --- FORMULARIO DE OPERACIONES ---
     const initialForm = { 
         id: null,
         type: 'Culto', 
         date: Utils.getLocalDate(), 
         
-        // CULTO - DETALLE
+        // CULTO - DETALLE ESPECÍFICO
         offeringsCash: '', 
         offeringsTransfer: '',
-        titheEnvelopes: [], // Array de { family, amount, prayer, method }
+        titheEnvelopes: [], // Array de { id, family, amount, prayer, method }
         
-        // OTROS
+        // OTROS (GASTOS/INGRESOS VARIOS)
         amount: '', 
         category: 'General', 
         method: 'Efectivo', 
         notes: '', 
         attachmentUrl: '',
+        
+        // CONFIGURACIÓN EXTRA
         isRecurring: false, 
         allocateToGoalId: '', 
         allocationAmount: ''
     };
     const [form, setForm] = useState(initialForm);
 
-    // Estado temporal para agregar sobre en el modal (Con método de pago individual)
+    // Estado temporal para agregar un sobre individualmente en el modal
     const [tempEnvelope, setTempEnvelope] = useState({ family: '', amount: '', prayer: '', method: 'Efectivo' });
 
-    // FONDOS (Antes Goals) - Persistencia en localStorage por ahora
-    const [goals, setGoals] = useState(() => JSON.parse(localStorage.getItem('finance_goals_v3')) || []);
+    // --- FONDOS / METAS (Simulados con persistencia local) ---
+    // Idealmente esto iría a una colección 'funds' en Firebase en el futuro
+    const [funds, setFunds] = useState(() => {
+        const saved = localStorage.getItem('church_funds_v1');
+        return saved ? JSON.parse(saved) : [{ id: 'general', name: 'Caja General', balance: 0, icon: 'Wallet', color: 'bg-indigo-500', type: 'saving' }];
+    });
     const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
     const [goalForm, setGoalForm] = useState({ id: null, label: '', category: '', amount: '', type: 'saving', currentSaved: 0 });
 
-    // Referencias
+    useEffect(() => {
+        localStorage.setItem('church_funds_v1', JSON.stringify(funds));
+    }, [funds]);
+
+    // --- REFERENCIAS PARA GRÁFICOS Y PDF ---
     const printRef = useRef(null);
     const [pdfData, setPdfData] = useState(null);
     
-    // Chart Refs
-    const chartRefs = { projection: useRef(null), breakdown: useRef(null), daily: useRef(null), trend: useRef(null) };
+    // Referencias para Chart.js
+    const chartRefs = { 
+        projection: useRef(null), 
+        breakdown: useRef(null), 
+        daily: useRef(null), 
+        trend: useRef(null) 
+    };
     const chartInstances = useRef({});
 
+    // Categorías del sistema
     const categories = [
         { value: 'General', label: 'General / Varios', icon: 'Info', color: '#94a3b8' },
         { value: 'Mantenimiento', label: 'Infraestructura', icon: 'Briefcase', color: '#f59e0b' },
@@ -75,7 +93,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         { value: 'Ofrendas', label: 'Ofrendas (Ingreso)', icon: 'Gift', color: '#8b5cf6' }
     ];
 
-    // --- HELPERS ---
+    // --- HELPERS Y CÁLCULOS ---
     const safeNum = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
     const blurClass = showBalance ? '' : 'filter blur-md select-none transition-all duration-500';
 
@@ -87,7 +105,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         return clean.split(/\s+/).sort().join(' ');
     };
 
-    // 1. Datos Mensuales
+    // 1. Datos del Mes (Filtrados)
     const monthlyData = useMemo(() => {
         if (!finances) return [];
         const m = currentDate.toISOString().slice(0, 7);
@@ -106,26 +124,37 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             .sort((a,b) => new Date(b.date) - new Date(a.date));
     }, [finances, currentDate, searchTerm, filterType]);
 
-    // 2. Totales
-    const monthTotals = useMemo(() => {
+    // 2. Totales Mensuales y Diezmo Nacional (10%)
+    const stats = useMemo(() => {
         let incomes = 0, expenses = 0;
+        
         monthlyData.forEach(f => {
             const val = safeNum(f.total || f.amount);
-            if (val > 0) incomes += val; else expenses += Math.abs(val);
+            if (val > 0) {
+                incomes += val;
+            } else {
+                expenses += Math.abs(val);
+            }
         });
-        return { incomes, expenses, net: incomes - expenses };
+
+        // Diezmo para Asamblea (10% de los ingresos brutos)
+        const nationalTithe = incomes * 0.10;
+
+        return { incomes, expenses, net: incomes - expenses, nationalTithe };
     }, [monthlyData]);
 
-    // 3. Saldos Globales
-    const globalBalances = useMemo(() => {
+    // 3. Saldos Globales (Caja vs Banco)
+    const balances = useMemo(() => {
         let cash = 0, bank = 0;
         if (finances) {
             finances.forEach(f => {
                 if (f.type === 'Culto') {
-                    cash += safeNum(f.tithesCash) + safeNum(f.offeringsCash);
-                    bank += safeNum(f.tithesTransfer) + safeNum(f.offeringsTransfer);
+                    // Sumar sobres (normalmente efectivo) + ofrenda efectivo
+                    let envelopesTotal = (f.titheEnvelopes || []).reduce((acc, curr) => acc + safeNum(curr.amount), 0);
+                    cash += envelopesTotal + safeNum(f.offeringsCash);
+                    bank += safeNum(f.offeringsTransfer);
                 } else {
-                    const val = safeNum(f.amount);
+                    const val = safeNum(f.amount); 
                     if (f.method === 'Banco') bank += val; else cash += val;
                 }
             });
@@ -133,9 +162,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         return { cash, bank, total: cash + bank };
     }, [finances]);
 
-    // 4. Análisis Diezmantes Mejorado
-    const [titherFilter, setTitherFilter] = useState('month'); // 'all', 'year', 'month'
-    
+    // 4. Análisis de Diezmadores (Histórico Global)
     const tithersAnalysis = useMemo(() => {
         const map = {};
         const now = new Date();
@@ -144,18 +171,17 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
 
         (finances || []).forEach(f => {
             if (f.type === 'Culto' && f.titheEnvelopes) {
-                // Aplicar Filtro de Tiempo
+                // Aplicar Filtro de Tiempo para el análisis
                 if (titherFilter === 'month' && !f.date.startsWith(currentMonth)) return;
                 if (titherFilter === 'year' && new Date(f.date).getFullYear() !== currentYear) return;
 
                 f.titheEnvelopes.forEach(env => {
-                    // Usar ID único basado en nombre normalizado para agrupar
                     const rawName = env.family || 'Anónimo';
                     const key = normalizeFamilyName(rawName);
                     
                     if (!map[key]) map[key] = { 
                         id: key, 
-                        displayName: rawName, // Guardamos el último nombre usado para mostrar
+                        displayName: rawName, // Guardamos el nombre visual
                         total: 0, 
                         count: 0, 
                         lastDate: f.date, 
@@ -175,15 +201,18 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         return Object.values(map).sort((a,b) => b.total - a.total);
     }, [finances, titherFilter]);
 
-    // --- GRÁFICOS (RESTAURADOS) ---
+    // 5. Datos para Gráficos (Chart.js)
     const chartData = useMemo(() => {
         if (!finances) return null;
+        
+        // A. Torta (Categorías)
         const pieMap = {};
         monthlyData.filter(f => safeNum(f.total||f.amount) < 0).forEach(f => {
             const c = f.category || 'General';
             pieMap[c] = (pieMap[c] || 0) + Math.abs(safeNum(f.total||f.amount));
         });
         
+        // B. Barras (Diario)
         const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
         const dailyLabels = Array.from({length: daysInMonth}, (_, i) => i + 1);
         const dailyIncome = new Array(daysInMonth).fill(0);
@@ -197,7 +226,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             }
         });
 
-        // Proyección
+        // C. Proyección Lineal
         const cumulative = [];
         let runningTotal = 0;
         [...monthlyData].sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(f => {
@@ -212,51 +241,93 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             projection = { current: runningTotal, end: runningTotal + (avgDaily * (daysInMonth - daysPassed)) };
         }
 
-        return { pie: { labels: Object.keys(pieMap), data: Object.values(pieMap) }, daily: { labels: dailyLabels, income: dailyIncome, expense: dailyExpense }, projection };
+        return { 
+            pie: { labels: Object.keys(pieMap), data: Object.values(pieMap) }, 
+            daily: { labels: dailyLabels, income: dailyIncome, expense: dailyExpense }, 
+            projection 
+        };
     }, [monthlyData, currentDate, finances]);
 
+    // --- EFECTOS (CHARTS) ---
     useEffect(() => {
         const Chart = window.Chart;
         if ((tabView !== 'stats' && tabView !== 'dashboard') || !Chart || !chartData) return;
-        Chart.defaults.color = '#94a3b8'; Chart.defaults.borderColor = 'rgba(255,255,255,0.05)';
+        
+        Chart.defaults.color = '#94a3b8'; 
+        Chart.defaults.borderColor = 'rgba(255,255,255,0.05)';
+        
+        // Limpiar instancias previas
         Object.values(chartInstances.current).forEach(c => c && c.destroy());
 
+        // 1. Gráfico de Proyección (Stats)
         if (chartRefs.projection.current && tabView === 'stats') {
             const ctx = chartRefs.projection.current.getContext('2d');
             const gradient = ctx.createLinearGradient(0, 0, 0, 400);
             gradient.addColorStop(0, 'rgba(99, 102, 241, 0.5)'); gradient.addColorStop(1, 'rgba(99, 102, 241, 0.0)');
+            
             chartInstances.current.projection = new Chart(chartRefs.projection.current, {
-                type: 'line', data: { labels: ['Inicio', 'Hoy', 'Fin'], datasets: [{ label: 'Proyección', data: [0, monthTotals.net, chartData.projection?.end || monthTotals.net], borderColor: '#818cf8', fill: true, backgroundColor: gradient }] },
+                type: 'line', 
+                data: { 
+                    labels: ['Inicio', 'Hoy', 'Fin'], 
+                    datasets: [{ label: 'Proyección', data: [0, monthTotals.net, chartData.projection?.end || monthTotals.net], borderColor: '#818cf8', fill: true, backgroundColor: gradient }] 
+                },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
             });
         }
+
+        // 2. Gráfico de Torta (Stats)
         if (chartRefs.breakdown.current && tabView === 'stats') {
             chartInstances.current.breakdown = new Chart(chartRefs.breakdown.current, {
-                type: 'doughnut', data: { labels: chartData.pie.labels, datasets: [{ data: chartData.pie.data, backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6'], borderWidth: 0 }] },
+                type: 'doughnut', 
+                data: { labels: chartData.pie.labels, datasets: [{ data: chartData.pie.data, backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6'], borderWidth: 0 }] },
                 options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'right', labels: { boxWidth: 10 } } } }
             });
         }
+
+        // 3. Gráfico Diario (Dashboard)
         const dailyRef = tabView === 'dashboard' ? chartRefs.trend : chartRefs.daily;
         if (dailyRef && dailyRef.current) {
             chartInstances.current.daily = new Chart(dailyRef.current, {
-                type: 'bar', data: { labels: chartData.daily.labels, datasets: [{ label: 'Ingreso', data: chartData.daily.income, backgroundColor: '#10b981', borderRadius: 4 }, { label: 'Gasto', data: chartData.daily.expense, backgroundColor: '#f43f5e', borderRadius: 4 }] },
+                type: 'bar', 
+                data: { 
+                    labels: chartData.daily.labels, 
+                    datasets: [{ label: 'Ingreso', data: chartData.daily.income, backgroundColor: '#10b981', borderRadius: 4 }, { label: 'Gasto', data: chartData.daily.expense, backgroundColor: '#f43f5e', borderRadius: 4 }] 
+                },
                 options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, display: false } }, plugins: { legend: { display: false } } }
             });
         }
         return () => Object.values(chartInstances.current).forEach(c => c && c.destroy());
     }, [chartData, tabView, monthTotals]);
 
-    // --- PIN LOGIC ---
+    // --- LÓGICA DE PIN Y BLOQUEO (REPARADA) ---
+    
+    // Esta es la función que faltaba y causaba el error
+    const handleBackgroundClick = () => {
+        if (isLocked && pinInputRef.current) {
+            pinInputRef.current.focus();
+        }
+    };
+
     useEffect(() => {
         if (isLocked) setTimeout(() => pinInputRef.current?.focus(), 100);
         if (pinInput.length === 4) {
-            if (pinInput === '2367') { setIsLocked(false); setErrorPin(false); } 
-            else { setErrorPin(true); Utils.notify("PIN Incorrecto", "error"); setPinInput(''); }
+            if (pinInput === '2367') { // CLAVE ACTUALIZADA
+                setIsLocked(false);
+                setErrorPin(false);
+            } else {
+                setErrorPin(true);
+                Utils.notify("PIN Incorrecto", "error");
+                setPinInput('');
+            }
         }
     }, [isLocked, pinInput]);
-    const handleVirtualKey = (n) => { setPinInput(prev => (prev + n).slice(0, 4)); pinInputRef.current?.focus(); };
 
-    // --- ACCIONES ---
+    const handleVirtualKey = (n) => {
+        setPinInput(prev => (prev + n).slice(0, 4));
+        pinInputRef.current?.focus();
+    };
+
+    // --- ACCIONES GENERALES ---
     const toggleSelect = (id) => { if (selectedIds.includes(id)) setSelectedIds(prev => prev.filter(i => i !== id)); else setSelectedIds(prev => [...prev, id]); };
     const selectAll = () => { if (selectedIds.length === monthlyData.length) setSelectedIds([]); else setSelectedIds(monthlyData.map(d => d.id)); };
     
@@ -281,8 +352,9 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         } catch (error) { Utils.notify("Error imagen", "error"); } finally { setIsUploading(false); }
     };
 
-    // --- SAVE LOGIC REESCRITA ---
+    // --- SAVE LOGIC REESCRITA (OFRENDAS + SOBRES) ---
     const handleSave = async () => {
+        // Validación Básica
         if (!form.date) return Utils.notify("Falta fecha", "error");
 
         let payload = { ...form };
@@ -293,6 +365,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             let tithesC = 0;
             let tithesT = 0;
             
+            // Recorrer cada sobre y sumar según si es Efectivo o Banco
             form.titheEnvelopes.forEach(e => {
                 if (e.method === 'Banco') tithesT += safeNum(e.amount);
                 else tithesC += safeNum(e.amount);
@@ -308,36 +381,49 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             payload.offeringsCash = offC;
             payload.offeringsTransfer = offT;
             
+            // Total Absoluto (Caja + Banco)
             totalAmount = tithesC + tithesT + offC + offT;
             
             if (totalAmount === 0) return Utils.notify("El total no puede ser 0", "error");
             
-            payload.total = totalAmount;
-            payload.amount = totalAmount;
+            payload.total = totalAmount; // Para compatibilidad
+            payload.amount = totalAmount; // Para cálculos genéricos
             payload.category = 'Culto General';
             payload.method = 'Mixto'; 
         
+        } else if (form.type === 'Transferencia') {
+            // Lógica de movimiento visual (no afecta balance global pero sí fondos)
+            totalAmount = safeNum(form.amount);
+            if (!form.toFund) return Utils.notify("Selecciona destino", "error");
+            payload.category = `Transf: ${form.fromFund} -> ${form.toFund}`; // No guardamos category como ID
+            payload.amount = 0; 
         } else {
+            // Gasto o Ingreso Vario
             totalAmount = safeNum(form.amount);
             if (totalAmount === 0) return Utils.notify("Monto requerido", "error");
+            
+            // Si es gasto, guardar negativo
             payload.amount = form.type === 'Gasto' ? -Math.abs(totalAmount) : Math.abs(totalAmount);
             payload.total = payload.amount;
         }
 
         try {
-            if (form.id) await updateData('finances', form.id, payload);
-            else await addData('finances', payload);
-            
+            if (form.id) {
+                // AQUÍ USAMOS UPDATE DATA PASADO POR PROPS
+                await updateData('finances', form.id, payload);
+            } else {
+                await addData('finances', payload);
+            }
             setIsModalOpen(false);
             setForm(initialForm);
             Utils.notify("Operación Guardada");
         } catch (e) {
             console.error(e);
-            Utils.notify("Error al guardar", "error");
+            Utils.notify("Error al guardar: " + e.message, "error");
         }
     };
 
-    // --- FONDOS ---
+    // --- FONDOS (CRUD) ---
     const handleSaveGoal = () => {
         let newGoals;
         const gData = { ...goalForm, currentSaved: safeNum(goalForm.currentSaved) };
@@ -357,13 +443,12 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
 
     const getGoalProgress = (goal) => {
         const target = safeNum(goal.amount);
-        let current = safeNum(goal.currentSaved); // Base manual
-        // Aquí podrías agregar lógica para sumar movimientos automáticos si quisieras
+        let current = safeNum(goal.currentSaved); 
         const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
         return { current, target, pct };
     };
 
-    // --- SUB-HANDLERS ---
+    // --- MANEJADORES DE SOBRES (DIEZMOS) ---
     const handleAddEnvelope = () => {
         if (!tempEnvelope.amount) return;
         setForm(prev => ({
@@ -373,16 +458,29 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         setTempEnvelope({ family: '', amount: '', prayer: '', method: 'Efectivo' });
     };
 
-    const handleEditEnvelope = (idx, field, value) => {
-        const updated = [...form.titheEnvelopes];
-        updated[idx] = { ...updated[idx], [field]: value };
-        setForm(prev => ({ ...prev, titheEnvelopes: updated }));
-    };
-
     const removeEnvelope = (idx) => {
         setForm(prev => ({ ...prev, titheEnvelopes: prev.titheEnvelopes.filter((_, i) => i !== idx) }));
     };
 
+    const handleEdit = (item) => {
+        setForm({
+            ...initialForm,
+            ...item,
+            titheEnvelopes: item.titheEnvelopes || []
+        });
+        setIsModalOpen(true);
+    };
+
+    const handleDelete = async () => {
+        if(!confirm(`¿Eliminar ${selectedIds.length} registros?`)) return;
+        const batch = window.db.batch();
+        selectedIds.forEach(id => batch.delete(window.db.collection('finances').doc(id)));
+        await batch.commit();
+        setSelectedIds([]);
+        Utils.notify("Eliminados");
+    };
+
+    // --- PDF EXPORT ---
     const handleExportPDF = (item) => {
         setPdfData(item);
         setTimeout(async () => {
@@ -392,25 +490,38 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         }, 500);
     };
 
-    // --- RENDER ---
+    // --- RENDERIZADO VISUAL ---
+    
+    // 1. PANTALLA DE BLOQUEO (Con botón de volver)
     if (isLocked) return (
-        <div onClick={handleBackgroundClick} className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050511] animate-enter cursor-pointer">
+        <div onClick={handleBackgroundClick} className="fixed inset-0 z-[100] flex items-center justify-center bg-[#020617] animate-enter cursor-pointer">
+            {/* Botón de Emergencia para Salir */}
             <button onClick={() => setMainTab && setMainTab('dashboard')} className="absolute top-6 left-6 text-slate-400 flex items-center gap-2 hover:text-white transition-colors z-50">
-                <Icon name="ChevronLeft"/> Volver
+                <Icon name="ChevronLeft"/> Volver al Inicio
             </button>
+
             <div className="relative bg-white/5 backdrop-blur-2xl p-8 rounded-[32px] shadow-2xl border border-white/10 max-w-sm w-full text-center" onClick={e => e.stopPropagation()}>
-                <div className={`bg-indigo-500 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-lg transition-all ${errorPin ? 'animate-shake bg-red-500' : ''}`}><Icon name="Lock" size={28}/></div>
-                <h2 className="text-2xl font-black text-white mb-2">Tesoreria</h2>
+                <div className={`bg-indigo-500 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-lg transition-all ${errorPin ? 'animate-shake bg-red-500' : ''}`}>
+                    <Icon name={errorPin ? "AlertCircle" : "Lock"} size={28}/>
+                </div>
+                <h2 className="text-2xl font-black text-white mb-2">Finanzas</h2>
                 <p className="text-slate-400 text-sm mb-6">Ingresa PIN (2367)</p>
+                
                 <input ref={pinInputRef} type="number" className="opacity-0 absolute top-0 left-0 w-full h-full" value={pinInput} onChange={e => setPinInput(e.target.value.slice(0,4))} onBlur={() => setTimeout(() => pinInputRef.current?.focus(), 100)}/>
-                <div className="flex justify-center gap-4 mb-8">{[0, 1, 2, 3].map(i => (<div key={i} className={`w-4 h-4 rounded-full transition-all ${i < pinInput.length ? 'bg-indigo-500 scale-110 shadow-[0_0_10px_#6366f1]' : 'bg-white/10'}`}></div>))}</div>
-                <div className="grid grid-cols-3 gap-3">{[1,2,3,4,5,6,7,8,9].map(n => (<button key={n} onClick={() => handleVirtualKey(n)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl border border-white/5 active:scale-95 transition-all">{n}</button>))}
+
+                <div className="flex justify-center gap-4 mb-8">
+                    {[0, 1, 2, 3].map(i => (<div key={i} className={`w-4 h-4 rounded-full transition-all ${i < pinInput.length ? 'bg-indigo-500 scale-110 shadow-[0_0_10px_#6366f1]' : 'bg-white/10'}`}></div>))}
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                    {[1,2,3,4,5,6,7,8,9].map(n => (<button key={n} onClick={() => handleVirtualKey(n)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl border border-white/5 active:scale-95 transition-all">{n}</button>))}
                     <div/><button onClick={() => handleVirtualKey(0)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl">0</button><button onClick={() => setPinInput(p=>p.slice(0,-1))} className="h-14 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center"><Icon name="Delete" size={20}/></button>
                 </div>
             </div>
         </div>
     );
 
+    // 2. DASHBOARD PRINCIPAL
     return (
         <div className="min-h-screen bg-[#020617] text-slate-200 font-sans -m-4 sm:-m-8 pb-32 relative overflow-hidden selection:bg-indigo-500/30">
             <div className="fixed top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-indigo-600/10 blur-[150px] pointer-events-none"></div>
@@ -426,10 +537,10 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                     <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto bg-white/5 p-1.5 rounded-2xl border border-white/10 backdrop-blur-md">
                         <div className="text-slate-300 px-2"><DateFilter currentDate={currentDate} onChange={setCurrentDate} /></div>
                         <div className="w-px h-6 bg-white/10 mx-1"></div>
-                        {['dashboard','list','tithers','funds'].map(t => (
+                        {['dashboard','stats','list','goals','tithers'].map(t => (
                             <button key={t} onClick={()=>setTabView(t)} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all relative overflow-hidden ${tabView===t?'text-white shadow-lg':'text-slate-400 hover:text-white hover:bg-white/5'}`}>
                                 {tabView===t && <div className="absolute inset-0 bg-indigo-600 opacity-80"></div>}
-                                <span className="relative z-10 capitalize">{t === 'dashboard' ? 'Resumen' : t === 'list' ? 'Movimientos' : t === 'tithers' ? 'Diezmantes' : 'Fondos'}</span>
+                                <span className="relative z-10 capitalize">{t === 'dashboard' ? 'Resumen' : t === 'stats' ? 'Gráficos' : t === 'list' ? 'Movimientos' : t === 'tithers' ? 'Diezmantes' : 'Fondos'}</span>
                             </button>
                         ))}
                         <button onClick={()=>{setForm({...initialForm, date: Utils.getLocalDate()}); setIsModalOpen(true)}} className="bg-white text-indigo-950 p-2 rounded-xl hover:bg-indigo-50 transition-all shadow-[0_0_15px_rgba(255,255,255,0.2)] ml-1"><Icon name="Plus" size={18}/></button>
@@ -449,12 +560,15 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                                 </div>
                             </div>
                         </div>
+                        
+                        {/* Tarjeta del 10% (Asamblea de Dios) */}
                         <div className="bg-[#1e293b]/50 backdrop-blur-md border border-white/10 rounded-[32px] p-6 relative overflow-hidden flex flex-col justify-center">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 rounded-full blur-2xl"></div>
                             <div className="flex items-center gap-2 mb-4 text-purple-400"><Icon name="TrendingUp" size={20}/><h3 className="font-bold uppercase tracking-wider text-xs">Diezmo Nacional (10%)</h3></div>
                             <h2 className={`text-4xl font-black text-white mb-4 ${blurClass}`}>{showBalance ? formatCurrency(stats.nationalTithe) : '••••'}</h2>
-                            <p className="text-xs text-slate-400">Sobre Ingresos: {formatCurrency(stats.incomes)}</p>
+                            <div className="bg-purple-500/10 rounded-xl p-3 border border-purple-500/20 text-xs text-purple-200"><span className="block font-bold mb-1">Cálculo:</span>Total Ingresos ({formatCurrency(stats.incomes)}) x 10%</div>
                         </div>
+                        
                         <div className="lg:col-span-3 bg-[#0f172a]/40 backdrop-blur-md border border-white/5 rounded-[32px] p-6">
                             <h4 className="text-white font-bold mb-4 flex items-center gap-2"><Icon name="BarChart" className="text-indigo-400"/> Flujo Diario</h4>
                             <div className={`h-40 w-full ${blurClass}`}><canvas ref={chartRefs.trend}></canvas></div>
@@ -462,7 +576,15 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                     </div>
                 )}
 
-                {/* VISTA 2: LISTADO */}
+                {/* VISTA 2: ESTADISTICAS */}
+                {tabView === 'stats' && (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-enter">
+                        <div className="bg-[#1e293b]/50 border border-white/10 rounded-[32px] p-6"><h4 className="text-white font-bold mb-4">Proyección Mensual</h4><div className={`h-64 ${blurClass}`}><canvas ref={chartRefs.projection}></canvas></div></div>
+                        <div className="bg-[#1e293b]/50 border border-white/10 rounded-[32px] p-6"><h4 className="text-white font-bold mb-4">Distribución Gastos</h4><div className={`h-64 ${blurClass}`}><canvas ref={chartRefs.breakdown}></canvas></div></div>
+                    </div>
+                )}
+
+                {/* VISTA 3: LISTADO */}
                 {tabView === 'list' && (
                     <div className="animate-enter space-y-4">
                         {monthlyData.length === 0 ? <div className="text-center py-20 text-slate-500">Sin movimientos.</div> : monthlyData.map(f => (
@@ -482,7 +604,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                     </div>
                 )}
 
-                {/* VISTA 3: DIEZMANTES MEJORADA */}
+                {/* VISTA 4: DIEZMANTES (Mejorada) */}
                 {tabView === 'tithers' && (
                     <div className="animate-enter space-y-6">
                         <div className="flex justify-end gap-2">
@@ -491,6 +613,10 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                             <button onClick={()=>setTitherFilter('all')} className={`px-3 py-1 rounded-full text-xs font-bold ${titherFilter==='all'?'bg-indigo-600 text-white':'bg-white/10 text-slate-400'}`}>Histórico</button>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="lg:col-span-2 bg-[#1e293b] p-6 rounded-[32px] border border-white/10 mb-4 flex justify-between items-center">
+                                <div><h3 className="text-xl font-bold text-white">Fidelidad de la Iglesia</h3><p className="text-slate-400 text-sm">Familias diezmantes ({titherFilter})</p></div>
+                                <div className="text-right"><span className="block text-xs text-slate-500 uppercase font-bold">Total Familias</span><span className="text-2xl font-black text-indigo-400">{tithersAnalysis.length}</span></div>
+                            </div>
                             {tithersAnalysis.map((t, i) => (
                                 <div key={i} className="bg-white/5 border border-white/5 p-5 rounded-2xl flex flex-col gap-3">
                                     <div className="flex justify-between items-start">
@@ -509,38 +635,31 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                     </div>
                 )}
 
-                {/* VISTA 4: FONDOS (DISEÑO MEJORADO) */}
+                {/* VISTA 5: FONDOS (Mejorada) */}
                 {tabView === 'funds' && (
                     <div className="animate-enter">
-                        <div className="flex justify-end mb-6"><Button onClick={()=>setIsGoalModalOpen(true)} icon="Plus">Nuevo Fondo</Button></div>
+                        <div className="flex justify-end mb-6"><Button onClick={()=>setIsGoalModalOpen(true)} icon="Plus">Crear Fondo</Button></div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                             {funds.map(fund => {
                                 const { current, target, pct } = getGoalProgress(fund);
+                                const isSaving = fund.type === 'saving';
                                 return (
                                     <div key={fund.id} className="bg-[#1e293b] border border-white/10 p-6 rounded-[32px] relative overflow-hidden group">
                                         <div className="flex justify-between items-start mb-4">
-                                            <div className={`w-12 h-12 rounded-2xl ${fund.type==='saving'?'bg-emerald-500':'bg-orange-500'} flex items-center justify-center text-white shadow-lg`}><Icon name={fund.type==='saving'?'Archive':'AlertCircle'}/></div>
+                                            <div className={`w-12 h-12 rounded-2xl ${isSaving?'bg-emerald-500':'bg-orange-500'} flex items-center justify-center text-white shadow-lg`}><Icon name={isSaving?'Archive':'AlertCircle'}/></div>
                                             <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <button onClick={()=>{setGoalForm(fund); setIsGoalModalOpen(true)}} className="text-slate-400 hover:text-white"><Icon name="Edit" size={16}/></button>
                                                 <button onClick={()=>handleDeleteGoal(fund.id)} className="text-slate-400 hover:text-red-500"><Icon name="Trash" size={16}/></button>
                                             </div>
                                         </div>
                                         <h3 className="text-xl font-bold text-white mb-1">{fund.label}</h3>
-                                        <p className="text-slate-400 text-xs uppercase font-bold mb-4">{fund.category} • {fund.type==='saving'?'Ahorro':'Presupuesto'}</p>
-                                        <div className="relative h-2 bg-white/10 rounded-full mb-2"><div className={`absolute h-full rounded-full ${fund.type==='saving'?'bg-emerald-500':'bg-orange-500'}`} style={{width: `${Math.min(pct,100)}%`}}></div></div>
+                                        <p className="text-slate-400 text-xs uppercase font-bold mb-4">{fund.category} • {isSaving?'Ahorro':'Presupuesto'}</p>
+                                        <div className="relative h-2 bg-white/10 rounded-full mb-2"><div className={`absolute h-full rounded-full ${isSaving?'bg-emerald-500':'bg-orange-500'}`} style={{width: `${Math.min(pct,100)}%`}}></div></div>
                                         <div className="flex justify-between text-xs font-bold text-slate-300"><span>Actual: {formatCurrency(current)}</span><span>Meta: {formatCurrency(target)}</span></div>
                                     </div>
                                 );
                             })}
                         </div>
-                    </div>
-                )}
-
-                {/* VISTA 5: ESTADÍSTICAS (RESTAURADA) */}
-                {tabView === 'stats' && (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-enter">
-                        <div className="bg-[#1e293b]/50 border border-white/10 rounded-[32px] p-6"><h4 className="text-white font-bold mb-4">Proyección Mensual</h4><div className={`h-64 ${blurClass}`}><canvas ref={chartRefs.projection}></canvas></div></div>
-                        <div className="bg-[#1e293b]/50 border border-white/10 rounded-[32px] p-6"><h4 className="text-white font-bold mb-4">Distribución Gastos</h4><div className={`h-64 ${blurClass}`}><canvas ref={chartRefs.breakdown}></canvas></div></div>
                     </div>
                 )}
             </div>
@@ -560,7 +679,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2"><Icon name="Gift" size={14}/> Ofrendas Sueltas</h4>
                                 <div className="grid grid-cols-2 gap-4">
                                     <Input label="Efectivo" type="number" placeholder="$0" value={form.offeringsCash} onChange={e => setForm({ ...form, offeringsCash: e.target.value })} />
-                                    <Input label="Digital" type="number" placeholder="$0" value={form.offeringsTransfer} onChange={e => setForm({ ...form, offeringsTransfer: e.target.value })} />
+                                    <Input label="Digital / Banco" type="number" placeholder="$0" value={form.offeringsTransfer} onChange={e => setForm({ ...form, offeringsTransfer: e.target.value })} />
                                 </div>
                             </div>
 
