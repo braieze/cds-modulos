@@ -1,794 +1,641 @@
 window.Views = window.Views || {};
 
-window.Views.Finances = ({ finances, addData, userProfile }) => {
+window.Views.Finances = ({ finances = [], addData, updateData, deleteData, userProfile, setActiveTab }) => {
     const { useState, useMemo, useEffect, useRef } = React;
     const Utils = window.Utils || {};
-    const { Button, Modal, Input, Select, DateFilter, formatCurrency, formatDate, Icon, SmartSelect, compressImage } = Utils;
+    const { Button, Modal, Input, Select, DateFilter, formatCurrency, formatDate, Icon, SmartSelect, Card, Badge, notify } = Utils;
 
     // --- ESTADOS ---
-    const [currentDate, setCurrentDate] = useState(new Date());
-    const [tabView, setTabView] = useState('dashboard');
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [isUploading, setIsUploading] = useState(false);
-    
-    // Privacy & UX
-    const [showBalance, setShowBalance] = useState(true);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [filterType, setFilterType] = useState('all');
-    const [expandedId, setExpandedId] = useState(null);
-
-    // Selección Múltiple
-    const [selectedIds, setSelectedIds] = useState([]);
-
-    // Seguridad PIN (MEJORADO)
+    // Navegación y Seguridad
+    const [pin, setPin] = useState('');
     const [isLocked, setIsLocked] = useState(true);
-    const [pinInput, setPinInput] = useState('');
-    const [errorPin, setErrorPin] = useState(false);
-    const pinInputRef = useRef(null); // Ref para foco automático
+    const [tab, setTab] = useState('dashboard'); // dashboard, list, tithers, funds
+    
+    // Filtros
+    const [currentDate, setCurrentDate] = useState(new Date());
+    const [searchTerm, setSearchTerm] = useState('');
+
+    // Modales y Formularios
+    const [modalMode, setModalMode] = useState(null); // 'transaction', 'culto', 'fund'
+    const [editingId, setEditingId] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
+
+    // Estado para "Sobres/Fondos" (Persistente en LocalStorage para config, cálculos en vivo)
+    const [fundsConfig, setFundsConfig] = useState(() => JSON.parse(localStorage.getItem('finance_funds_config')) || []);
 
     // Formularios
-    const initialForm = { 
-        type: 'Culto', date: Utils.getLocalDate(), 
-        tithesCash: '', tithesTransfer: '', offeringsCash: '', offeringsTransfer: '', 
-        amount: '', category: 'General', method: 'Efectivo', notes: '', attachmentUrl: '',
-        isRecurring: false, allocateToGoalId: '', allocationAmount: ''
-    };
+    const initialForm = { type: 'Ingreso', category: 'General', amount: '', method: 'Efectivo', notes: '', date: Utils.getLocalDate(), fundId: '', isRecurring: false };
     const [form, setForm] = useState(initialForm);
 
-    // Metas
-    const [goals, setGoals] = useState(() => JSON.parse(localStorage.getItem('finance_goals_v3')) || []);
-    const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
-    const [goalForm, setGoalForm] = useState({ id: null, category: '', amount: '', type: 'spending', label: '', currentSaved: 0 });
-
-    // Referencias Gráficos
-    const printRef = useRef(null);
-    const [pdfData, setPdfData] = useState(null);
+    const initialCulto = { date: Utils.getLocalDate(), offeringsCash: '', offeringsTransfer: '', tithesDetails: [] }; // tithesDetails: [{name, amount, method, prayer}]
+    const [cultoForm, setCultoForm] = useState(initialCulto);
     
-    // Chart Refs
-    const chartRefs = {
-        projection: useRef(null),
-        breakdown: useRef(null),
-        daily: useRef(null),
-        trend: useRef(null)
-    };
-    const chartInstances = useRef({});
+    // Auxiliares para carga de culto
+    const [titherInput, setTitherInput] = useState({ name: '', amount: '', method: 'Efectivo', prayer: '' });
 
-    const categories = [
-        { value: 'General', label: 'General / Varios', icon: 'Info', color: '#94a3b8' },
-        { value: 'Mantenimiento', label: 'Infraestructura', icon: 'Briefcase', color: '#f59e0b' },
-        { value: 'Honorarios', label: 'Honorarios / Sueldos', icon: 'Users', color: '#3b82f6' },
-        { value: 'Alquiler', label: 'Alquiler', icon: 'Home', color: '#ef4444' },
-        { value: 'Ayuda Social', label: 'Ayuda Social', icon: 'Smile', color: '#10b981' },
-        { value: 'Ministerios', label: 'Ministerios', icon: 'Music', color: '#8b5cf6' },
-        { value: 'Ofrenda Misionera', label: 'Misiones', icon: 'Globe', color: '#ec4899' },
-        { value: 'Diezmos', label: 'Diezmos (Ingreso)', icon: 'TrendingUp', color: '#6366f1' },
-        { value: 'Ofrendas', label: 'Ofrendas (Ingreso)', icon: 'Gift', color: '#8b5cf6' }
-    ];
+    // Formulario Fondos
+    const [fundForm, setFundForm] = useState({ id: null, name: '', type: 'saving', target: '' }); // type: saving (acumular), limit (gasto max)
 
-    // --- HELPERS & CALCULOS ---
+    // --- LÓGICA DE SEGURIDAD ---
+    useEffect(() => {
+        if (pin === '2367') { setIsLocked(false); setPin(''); }
+        if (pin.length === 4 && pin !== '2367') { notify('PIN Incorrecto', 'error'); setPin(''); }
+    }, [pin]);
+
+    // --- CÁLCULOS Y MEMORIZACIÓN (El Cerebro) ---
+    
     const safeNum = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
-    const blurClass = showBalance ? '' : 'filter blur-md select-none transition-all duration-500';
 
-    // 1. Datos Mensuales
+    // 1. Filtrar datos por Mes seleccionado
     const monthlyData = useMemo(() => {
-        if (!finances) return [];
-        const m = currentDate.toISOString().slice(0, 7);
-        return finances
-            .filter(f => f.date && f.date.startsWith(m))
-            .filter(f => {
-                if (searchTerm) {
-                    const term = searchTerm.toLowerCase();
-                    return (f.category||'').toLowerCase().includes(term) || (f.notes||'').toLowerCase().includes(term);
-                }
-                if (filterType === 'income') return safeNum(f.total || f.amount) > 0;
-                if (filterType === 'expense') return safeNum(f.total || f.amount) < 0;
-                if (filterType === 'recurring') return f.isRecurring === true;
-                return true;
-            })
-            .sort((a,b) => new Date(b.date) - new Date(a.date));
-    }, [finances, currentDate, searchTerm, filterType]);
+        const m = currentDate.toISOString().slice(0, 7); // YYYY-MM
+        return finances.filter(f => f.date && f.date.startsWith(m)).sort((a,b) => new Date(b.date) - new Date(a.date));
+    }, [finances, currentDate]);
 
-    // 2. Totales Mensuales
-    const monthTotals = useMemo(() => {
-        let incomes = 0, expenses = 0;
-        monthlyData.forEach(f => {
+    // 2. Balances Globales (Efectivo vs Banco vs Total)
+    const balances = useMemo(() => {
+        let cash = 0, bank = 0, income = 0, expense = 0;
+        
+        finances.forEach(f => {
             const val = safeNum(f.total || f.amount);
-            if (val > 0) incomes += val; else expenses += Math.abs(val);
-        });
-        return { incomes, expenses, net: incomes - expenses };
-    }, [monthlyData]);
-
-    // 3. Saldos Globales Reales
-    const globalBalances = useMemo(() => {
-        let cash = 0, bank = 0;
-        if (finances) {
-            finances.forEach(f => {
-                let val = 0;
-                if (f.type === 'Culto') {
-                    cash += safeNum(f.tithesCash)+safeNum(f.offeringsCash);
-                    bank += safeNum(f.tithesTransfer)+safeNum(f.offeringsTransfer);
+            
+            // Lógica para detectar método en Cultos complejos
+            if (f.type === 'Culto') {
+                // Sumar ofrendas
+                const offCash = safeNum(f.offeringsCash);
+                const offBank = safeNum(f.offeringsTransfer);
+                cash += offCash; bank += offBank;
+                
+                // Sumar diezmos detallados
+                if (f.tithesDetails && Array.isArray(f.tithesDetails)) {
+                    f.tithesDetails.forEach(t => {
+                        const tVal = safeNum(t.amount);
+                        if (t.method === 'Banco') bank += tVal; else cash += tVal;
+                    });
                 } else {
-                    val = safeNum(f.amount);
-                    if (f.method === 'Banco') bank += val; else cash += val;
+                    // Fallback para datos viejos
+                    cash += safeNum(f.tithesCash);
+                    bank += safeNum(f.tithesTransfer);
                 }
-            });
-        }
-        return { cash, bank, total: cash + bank };
+                income += val;
+            } else {
+                // Ingresos/Gastos normales
+                if (val > 0) income += val; else expense += Math.abs(val);
+                
+                if (f.method === 'Banco') bank += val; else cash += val;
+            }
+        });
+
+        return { cash, bank, total: cash + bank, income, expense };
     }, [finances]);
 
-    // 4. Datos para Gráficos
-    const chartData = useMemo(() => {
-        if (!finances) return null;
-        
-        // A. Breakdown (Torta)
-        const pieMap = {};
-        monthlyData.filter(f => safeNum(f.total||f.amount) < 0).forEach(f => {
-            const c = f.category || 'General';
-            pieMap[c] = (pieMap[c] || 0) + Math.abs(safeNum(f.total||f.amount));
-        });
-
-        // B. Daily (Barras)
-        const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
-        const dailyLabels = Array.from({length: daysInMonth}, (_, i) => i + 1);
-        const dailyIncome = new Array(daysInMonth).fill(0);
-        const dailyExpense = new Array(daysInMonth).fill(0);
-        
+    // 3. Totales del Mes Actual
+    const monthStats = useMemo(() => {
+        let inc = 0, exp = 0;
         monthlyData.forEach(f => {
-            const d = parseInt(f.date.slice(8, 10)) - 1;
             const val = safeNum(f.total || f.amount);
-            if(d >= 0 && d < daysInMonth) {
-                if(val > 0) dailyIncome[d] += val;
-                else dailyExpense[d] += Math.abs(val);
+            if (val > 0) inc += val; else exp += Math.abs(val);
+        });
+        return { income: inc, expense: exp, net: inc - exp, titheToAssembly: inc * 0.10 };
+    }, [monthlyData]);
+
+    // 4. Lógica de Diezmantes (Fuzzy Match & Agrupación)
+    const tithersStats = useMemo(() => {
+        const map = {};
+        const normalize = (s) => s ? s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace("familia", "").replace("flia", "").trim() : "anonimo";
+
+        finances.forEach(f => {
+            if (f.type === 'Culto' && f.tithesDetails && Array.isArray(f.tithesDetails)) {
+                f.tithesDetails.forEach(t => {
+                    const key = normalize(t.name);
+                    if (!map[key]) map[key] = { id: key, display: t.name, total: 0, count: 0, lastDate: f.date };
+                    map[key].total += safeNum(t.amount);
+                    map[key].count += 1;
+                    if (f.date > map[key].lastDate) map[key].lastDate = f.date;
+                    // Mantener el nombre más largo/completo como display
+                    if (t.name.length > map[key].display.length) map[key].display = t.name;
+                });
             }
         });
+        return Object.values(map).sort((a,b) => b.total - a.total);
+    }, [finances]);
 
-        // C. Projection (Lineal)
-        const cumulative = [];
-        let runningTotal = 0;
-        const sortedMonth = [...monthlyData].sort((a,b) => new Date(a.date) - new Date(b.date));
-        sortedMonth.forEach(f => {
-             runningTotal += safeNum(f.total || f.amount);
-             cumulative.push(runningTotal);
+    const tithersThisMonth = useMemo(() => {
+        const m = currentDate.toISOString().slice(0, 7);
+        let count = 0;
+        const processed = new Set();
+        monthlyData.forEach(f => {
+            if(f.type === 'Culto' && f.tithesDetails) {
+                f.tithesDetails.forEach(t => {
+                    const name = t.name.toLowerCase().trim();
+                    if(!processed.has(name)) { count++; processed.add(name); }
+                });
+            }
         });
-        const today = new Date();
-        const isCurrentMonth = today.getMonth() === currentDate.getMonth() && today.getFullYear() === currentDate.getFullYear();
-        let projection = null;
-        if (isCurrentMonth && cumulative.length > 0) {
-            const daysPassed = today.getDate();
-            const avgDaily = runningTotal / daysPassed;
-            const projectedEnd = runningTotal + (avgDaily * (daysInMonth - daysPassed));
-            projection = { current: runningTotal, end: projectedEnd };
-        }
+        return count;
+    }, [monthlyData]);
 
-        return { 
-            pie: { labels: Object.keys(pieMap), data: Object.values(pieMap) },
-            daily: { labels: dailyLabels, income: dailyIncome, expense: dailyExpense },
-            projection
-        };
-    }, [monthlyData, currentDate, finances]);
-
-    // --- CHARTS EFFECTS ---
-    useEffect(() => {
-        const Chart = window.Chart;
-        if ((tabView !== 'stats' && tabView !== 'dashboard') || !Chart || !chartData) return;
-        
-        Chart.defaults.color = '#94a3b8'; 
-        Chart.defaults.borderColor = 'rgba(255,255,255,0.05)';
-        
-        Object.values(chartInstances.current).forEach(c => c && c.destroy());
-
-        if (chartRefs.projection.current && tabView === 'stats') {
-            const ctx = chartRefs.projection.current.getContext('2d');
-            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
-            gradient.addColorStop(0, 'rgba(99, 102, 241, 0.5)');
-            gradient.addColorStop(1, 'rgba(99, 102, 241, 0.0)');
-
-            chartInstances.current.projection = new Chart(chartRefs.projection.current, {
-                type: 'line',
-                data: {
-                    labels: ['Inicio', 'Hoy', 'Fin de Mes (Est.)'],
-                    datasets: [{
-                        label: 'Balance Proyectado',
-                        data: [0, monthTotals.net, chartData.projection ? chartData.projection.end : monthTotals.net],
-                        borderColor: '#818cf8',
-                        borderDash: [5, 5],
-                        fill: true,
-                        backgroundColor: gradient,
-                        tension: 0.4
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-            });
-        }
-
-        if (chartRefs.breakdown.current && tabView === 'stats') {
-            chartInstances.current.breakdown = new Chart(chartRefs.breakdown.current, {
-                type: 'doughnut',
-                data: {
-                    labels: chartData.pie.labels,
-                    datasets: [{
-                        data: chartData.pie.data,
-                        backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1'],
-                        borderWidth: 0,
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'right', labels: { boxWidth: 10 } } } }
-            });
-        }
-
-        const dailyRef = tabView === 'dashboard' ? chartRefs.trend : chartRefs.daily;
-        if (dailyRef && dailyRef.current) {
-            chartInstances.current.daily = new Chart(dailyRef.current, {
-                type: 'bar',
-                data: {
-                    labels: chartData.daily.labels,
-                    datasets: [
-                        { label: 'Ingreso', data: chartData.daily.income, backgroundColor: '#10b981', borderRadius: 4 },
-                        { label: 'Gasto', data: chartData.daily.expense, backgroundColor: '#f43f5e', borderRadius: 4 }
-                    ]
-                },
-                options: { 
-                    responsive: true, 
-                    maintainAspectRatio: false, 
-                    scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, display: false } },
-                    plugins: { legend: { display: false } }
+    // 5. Lógica de Fondos (Virtual Envelopes)
+    const fundsStatus = useMemo(() => {
+        return fundsConfig.map(fund => {
+            let current = 0;
+            // Sumar movimientos asignados a este fondo
+            finances.forEach(f => {
+                if (f.fundId === fund.id) {
+                    current += Math.abs(safeNum(f.amount || f.total)); // Sumamos asignaciones
+                }
+                // También podríamos restar si se gasta DEL fondo, pero por ahora simplifiquemos:
+                // Si es gasto y tiene fundId, resta al fondo? 
+                // Asumiremos: Ingreso con fundId -> Suma al fondo. Gasto con fundId -> Resta del fondo.
+                 if (f.fundId === fund.id) {
+                    // Recalcular correctamente
+                    // Si el movimiento original era positivo (ingreso), suma al fondo.
+                    // Si era negativo (gasto), resta.
+                    // PERO, safeNum ya trae el signo.
+                    // current += safeNum(f.amount || f.total);  <-- Esto seria si asignamos directamete
                 }
             });
-        }
+            
+            // Lógica simple solicitada: "Destinar plata". 
+            // Vamos a calcular saldo basado en transacciones que explícitamente muevan a este fondo
+            const balance = finances.reduce((acc, f) => f.fundId === fund.id ? acc + safeNum(f.amount || f.total) : acc, 0);
 
-        return () => Object.values(chartInstances.current).forEach(c => c && c.destroy());
-    }, [chartData, tabView, monthTotals]);
-
-    // --- EFECTOS & LÓGICA PIN MEJORADA ---
-    
-    // 1. Auto-Focus al montar y validación automática
-    useEffect(() => {
-        if (isLocked) {
-            // Intentar enfocar el input invisible para que salga el teclado en móvil
-            setTimeout(() => {
-                if (pinInputRef.current) pinInputRef.current.focus();
-            }, 100);
-        }
-
-        // Auto-Validación al llegar a 4 dígitos
-        if (pinInput.length === 4) {
-            if (pinInput === '1234') {
-                setIsLocked(false);
-                setErrorPin(false);
-            } else {
-                setErrorPin(true);
-                Utils.notify("PIN Incorrecto", "error");
-                setPinInput(''); // Borrar input para reintentar
+            // Si es tipo 'limit' (Presupuesto), el cálculo es cuánto se ha gastado.
+            let spent = 0;
+            if (fund.type === 'limit') {
+                spent = finances.reduce((acc, f) => (f.fundId === fund.id && safeNum(f.total||f.amount) < 0) ? acc + Math.abs(safeNum(f.total||f.amount)) : acc, 0);
+                return { ...fund, current: spent, isLimit: true };
             }
-        }
-    }, [isLocked, pinInput]);
 
-    // Manejo de clicks en el fondo para recuperar el foco
-    const handleBackgroundClick = () => {
-        if (isLocked && pinInputRef.current) {
-            pinInputRef.current.focus();
-        }
-    };
-
-    // Manejo de botones virtuales (suman al string existente)
-    const handleVirtualKey = (n) => {
-        setPinInput(prev => (prev + n).slice(0, 4));
-        if (pinInputRef.current) pinInputRef.current.focus(); // Mantener teclado activo si se desea
-    };
+            return { ...fund, current: balance, isLimit: false };
+        });
+    }, [finances, fundsConfig]);
 
 
     // --- ACCIONES ---
-    const toggleSelect = (id) => { if (selectedIds.includes(id)) setSelectedIds(prev => prev.filter(i => i !== id)); else setSelectedIds(prev => [...prev, id]); };
-    const selectAll = () => { if (selectedIds.length === monthlyData.length) setSelectedIds([]); else setSelectedIds(monthlyData.map(d => d.id)); };
-    
-    const handleBulkDelete = async () => {
-        if(!confirm(`¿ELIMINAR ${selectedIds.length} ELEMENTOS?`)) return;
-        const batch = window.db.batch();
-        selectedIds.forEach(id => batch.delete(window.db.collection('finances').doc(id)));
-        await batch.commit();
-        setSelectedIds([]);
-        Utils.notify("Eliminados correctamente");
-    };
 
-    // --- CABO SUELTO SOLUCIONADO: handleImage ---
-    const handleImage = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+    const handleSaveTransaction = async () => {
+        if (!form.amount || parseFloat(form.amount) === 0) return notify("El monto es obligatorio", "error");
         
-        setIsUploading(true);
+        const data = {
+            ...form,
+            amount: form.type === 'Gasto' ? -Math.abs(form.amount) : Math.abs(form.amount),
+            total: form.type === 'Gasto' ? -Math.abs(form.amount) : Math.abs(form.amount),
+            updatedAt: new Date().toISOString()
+        };
+
         try {
-            // Si Utils tiene compressImage, la usamos, sino un lector básico
-            let result;
-            if (Utils.compressImage) {
-                result = await Utils.compressImage(file);
-            } else {
-                result = await new Promise((resolve) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result);
-                    reader.readAsDataURL(file);
-                });
-            }
-            setForm(prev => ({ ...prev, attachmentUrl: result }));
-            Utils.notify("Imagen adjuntada");
-        } catch (error) {
-            console.error(error);
-            Utils.notify("Error al subir imagen", "error");
-        } finally {
-            setIsUploading(false);
-        }
+            if (editingId) await updateData('finances', editingId, data);
+            else await addData('finances', { ...data, createdAt: new Date().toISOString() });
+            
+            setModalMode(null);
+            setForm(initialForm);
+            setEditingId(null);
+            notify("Movimiento registrado");
+        } catch (e) { notify("Error al guardar", "error"); }
     };
 
-    const handleSave = () => { 
-        let f = {...form, createdAt: new Date().toISOString() };
-        
-        // Validación
-        if(form.type==='Culto') {
-            const t = safeNum(form.tithesCash)+safeNum(form.tithesTransfer)+safeNum(form.offeringsCash)+safeNum(form.offeringsTransfer);
-            if(t===0) return Utils.notify("Total 0 no permitido", "error");
-            f.total = t; f.category = 'Culto';
-        } else {
-            const a = safeNum(form.amount); if(a===0) return Utils.notify("Monto requerido", "error");
-            const v = Math.abs(a); f.amount = form.type==='Gasto'?-v:v; f.total = f.amount;
-        }
+    const handleSaveCulto = async () => {
+        // Calcular totales finales
+        const offCash = safeNum(cultoForm.offeringsCash);
+        const offBank = safeNum(cultoForm.offeringsTransfer);
+        const tithesTotal = cultoForm.tithesDetails.reduce((acc, t) => acc + safeNum(t.amount), 0);
+        const total = offCash + offBank + tithesTotal;
 
-        // Asignación a Meta
-        if ((form.type === 'Ingreso' || form.type === 'Culto') && form.allocateToGoalId && safeNum(form.allocationAmount) > 0) {
-            const goalId = form.allocateToGoalId;
-            const allocAmount = safeNum(form.allocationAmount);
-            const updatedGoals = goals.map(g => {
-                if (g.id === goalId) {
-                    return { ...g, currentSaved: (g.currentSaved || 0) + allocAmount };
-                }
-                return g;
+        if (total === 0) return notify("El culto no puede estar en cero", "error");
+
+        const data = {
+            type: 'Culto',
+            date: cultoForm.date,
+            category: 'Culto General',
+            offeringsCash: offCash,
+            offeringsTransfer: offBank,
+            tithesDetails: cultoForm.tithesDetails,
+            total: total,
+            updatedAt: new Date().toISOString()
+        };
+
+        try {
+            if (editingId) await updateData('finances', editingId, data);
+            else await addData('finances', { ...data, createdAt: new Date().toISOString() });
+            
+            setModalMode(null);
+            setCultoForm(initialCulto);
+            setEditingId(null);
+            notify("Culto registrado exitosamente");
+        } catch (e) { notify("Error al guardar culto", "error"); }
+    };
+
+    const addTitherToCulto = () => {
+        if (!titherInput.name || !titherInput.amount) return notify("Nombre y monto requeridos", "error");
+        setCultoForm(prev => ({
+            ...prev,
+            tithesDetails: [...prev.tithesDetails, { ...titherInput, id: Date.now() }]
+        }));
+        setTitherInput({ name: '', amount: '', method: 'Efectivo', prayer: '' });
+    };
+
+    const removeTither = (id) => {
+        setCultoForm(prev => ({ ...prev, tithesDetails: prev.tithesDetails.filter(t => t.id !== id) }));
+    };
+
+    const handleDelete = async (id) => {
+        try {
+            await deleteData('finances', id);
+            notify("Eliminado correctamente");
+        } catch (e) { notify("Error al eliminar", "error"); }
+    };
+
+    const prepareEdit = (item) => {
+        setEditingId(item.id);
+        if (item.type === 'Culto') {
+            setCultoForm({
+                date: item.date,
+                offeringsCash: item.offeringsCash || '',
+                offeringsTransfer: item.offeringsTransfer || '',
+                tithesDetails: item.tithesDetails || []
             });
-            setGoals(updatedGoals);
-            localStorage.setItem('finance_goals_v3', JSON.stringify(updatedGoals));
-            f.notes = (f.notes || '') + ` [Asignado $${allocAmount} a Meta]`;
-        }
-
-        addData('finances', f); 
-        setIsModalOpen(false); 
-        setForm(initialForm); 
-        Utils.notify("Registrado con éxito");
-    };
-
-    // --- PDF & CSV ---
-    const handleExportCSV = () => {
-        const headers = ["ID", "Fecha", "Tipo", "Categoría", "Monto", "Método", "Nota"];
-        const rows = monthlyData.map(f => [
-            f.id, f.date, f.type, f.category || 'Culto', safeNum(f.total || f.amount), f.method, `"${(f.notes || '').replace(/"/g, '""')}"`
-        ]);
-        const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-        const link = document.createElement("a"); link.setAttribute("href", encodeURI(csvContent)); link.setAttribute("download", `Reporte_${currentDate.toISOString().slice(0,7)}.csv`);
-        document.body.appendChild(link); link.click(); document.body.removeChild(link);
-    };
-
-    const handleExportPDF = (item) => {
-        setPdfData(item);
-        setTimeout(async () => {
-            const el = printRef.current; el.style.display = 'block';
-            if (window.html2pdf) await window.html2pdf().set({ margin:0, filename:`Recibo.pdf`, image:{type:'jpeg',quality:0.98}, html2canvas:{scale:3, useCORS:true}, jsPDF:{unit:'mm',format:[100,150]} }).from(el).save();
-            el.style.display = 'none';
-        }, 500);
-    };
-
-    // --- METAS ---
-    const handleSaveGoal = () => {
-        let newGoals;
-        const gData = { ...goalForm, currentSaved: safeNum(goalForm.currentSaved) };
-        if (goalForm.id) newGoals = goals.map(g => g.id === goalForm.id ? { ...g, ...gData, id: goalForm.id } : g);
-        else newGoals = [...goals, { ...gData, id: Date.now().toString() }];
-        setGoals(newGoals);
-        localStorage.setItem('finance_goals_v3', JSON.stringify(newGoals));
-        setIsGoalModalOpen(false);
-    };
-    
-    const handleDeleteGoal = (id) => {
-        if(!confirm("¿Borrar meta?")) return;
-        const newGoals = goals.filter(g => g.id !== id);
-        setGoals(newGoals);
-        localStorage.setItem('finance_goals_v3', JSON.stringify(newGoals));
-        setIsGoalModalOpen(false);
-    };
-
-    const getGoalProgress = (goal) => {
-        const target = safeNum(goal.amount);
-        let current = 0;
-        
-        if (goal.type === 'saving') {
-            current = safeNum(goal.currentSaved);
+            setModalMode('culto');
         } else {
-            monthlyData.forEach(f => {
-                const val = safeNum(f.total || f.amount);
-                if (val < 0 && (f.category === goal.category || (goal.category === 'Culto' && f.type === 'Culto'))) {
-                    current += Math.abs(val);
-                }
+            setForm({
+                type: item.amount < 0 ? 'Gasto' : 'Ingreso',
+                category: item.category,
+                amount: Math.abs(item.amount),
+                method: item.method,
+                notes: item.notes,
+                date: item.date,
+                fundId: item.fundId || '',
+                isRecurring: item.isRecurring || false
             });
+            setModalMode('transaction');
         }
-        const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
-        return { current, target, pct };
     };
-    
-    const totalAllocated = goals.filter(g => g.type === 'saving').reduce((acc, g) => acc + safeNum(g.currentSaved), 0);
-    const freeBalance = globalBalances.total - totalAllocated;
 
-    // --- RENDER ---
-    if (userProfile?.role !== 'Pastor') return <div className="h-full flex items-center justify-center text-slate-500">Acceso Restringido</div>;
-    
-    // --- PANTALLA DE BLOQUEO ACTUALIZADA ---
-    if (isLocked) return (
-        <div 
-            onClick={handleBackgroundClick} // 1. Foco al tocar fondo
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050511] animate-enter cursor-pointer"
-        >
-            <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/40 via-purple-900/20 to-black pointer-events-none"></div>
-            <div className="relative bg-white/5 backdrop-blur-2xl p-8 rounded-[32px] shadow-2xl border border-white/10 max-w-sm w-full text-center" onClick={e => e.stopPropagation()}>
-                <div className={`bg-indigo-500 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-lg shadow-indigo-500/50 transition-all ${errorPin ? 'animate-shake bg-red-500 shadow-red-500/50' : ''}`}>
-                    <Icon name={errorPin ? "AlertCircle" : "Lock"} size={28}/>
-                </div>
-                <h2 className="text-2xl font-black text-white mb-2">Finanzas</h2>
-                <p className="text-slate-400 text-sm mb-6">Ingresa el PIN de seguridad</p>
-                
-                {/* Input Híbrido: Invisible pero enfocado */}
-                <input 
-                    ref={pinInputRef}
-                    type="number" // Numeric para teclado móvil
-                    pattern="[0-9]*"
-                    inputMode="numeric"
-                    maxLength="4" 
-                    className="opacity-0 absolute top-0 left-0 w-full h-full pointer-events-none" // pointer-events-none para que el click pase al div wrapper si es necesario, o manejarlo con el ref
-                    value={pinInput} 
-                    onChange={e => setPinInput(e.target.value.slice(0,4))} 
-                    onBlur={() => setTimeout(() => pinInputRef.current?.focus(), 100)} // Intentar mantener foco
-                />
+    // Gestión de Fondos (LocalStorage)
+    const saveFund = () => {
+        if (!fundForm.name) return notify("Nombre requerido", "error");
+        let newFunds;
+        if (fundForm.id) {
+            newFunds = fundsConfig.map(f => f.id === fundForm.id ? fundForm : f);
+        } else {
+            newFunds = [...fundsConfig, { ...fundForm, id: Date.now().toString() }];
+        }
+        setFundsConfig(newFunds);
+        localStorage.setItem('finance_funds_config', JSON.stringify(newFunds));
+        setModalMode(null);
+        notify("Fondo guardado");
+    };
 
-                {/* Indicadores visuales de dígitos */}
-                <div className="flex justify-center gap-4 mb-8">
-                    {[0, 1, 2, 3].map(i => (
-                        <div key={i} className={`w-4 h-4 rounded-full transition-all duration-300 ${i < pinInput.length ? 'bg-indigo-500 scale-110 shadow-[0_0_10px_#6366f1]' : 'bg-white/10'}`}></div>
-                    ))}
-                </div>
+    const deleteFund = (id) => {
+        if(!confirm("¿Borrar este fondo?")) return;
+        const newFunds = fundsConfig.filter(f => f.id !== id);
+        setFundsConfig(newFunds);
+        localStorage.setItem('finance_funds_config', JSON.stringify(newFunds));
+    };
 
-                {/* Botones Virtuales */}
-                <div className="grid grid-cols-3 gap-3">
-                    {[1,2,3,4,5,6,7,8,9].map(n => (
-                        <button key={n} type="button" onClick={() => handleVirtualKey(n)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl border border-white/5 active:scale-95 transition-all">{n}</button>
-                    ))}
-                    <div/>
-                    <button type="button" onClick={() => handleVirtualKey(0)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl border border-white/5 active:scale-95 transition-all">0</button>
-                    <button type="button" onClick={() => setPinInput(p=>p.slice(0,-1))} className="h-14 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center border border-red-500/10 hover:bg-red-500/20 active:scale-95 transition-all"><Icon name="Delete" size={20}/></button>
+    // --- VISTAS RENDER ---
+
+    if (isLocked) {
+        return (
+            <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col items-center justify-center p-4">
+                <div className="bg-white/10 backdrop-blur-xl p-8 rounded-3xl w-full max-w-sm text-center border border-white/10">
+                    <div className="w-16 h-16 bg-brand-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-glow text-white"><Icon name="Shield" size={32}/></div>
+                    <h2 className="text-2xl font-bold text-white mb-2">Tesorería Bloqueada</h2>
+                    <p className="text-slate-400 text-sm mb-6">Ingresa el PIN de acceso</p>
+                    <div className="flex justify-center gap-4 mb-8">
+                        {[0,1,2,3].map(i => <div key={i} className={`w-3 h-3 rounded-full transition-all ${i < pin.length ? 'bg-brand-500 scale-125' : 'bg-white/20'}`}></div>)}
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 mb-6">
+                        {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} onClick={()=>setPin(p=>p.length<4?p+n:p)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl transition-colors">{n}</button>)}
+                        <div/>
+                        <button onClick={()=>setPin(p=>p.length<4?p+'0':p)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl transition-colors">0</button>
+                        <button onClick={()=>setPin(p=>p.slice(0,-1))} className="h-14 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center"><Icon name="X"/></button>
+                    </div>
+                    <button onClick={() => setActiveTab('dashboard')} className="text-slate-400 text-sm hover:text-white font-medium flex items-center justify-center gap-2 w-full py-2">
+                        <Icon name="ArrowRight" className="rotate-180" size={16}/> Volver al Inicio
+                    </button>
                 </div>
             </div>
-        </div>
-    );
+        );
+    }
 
     return (
-        <div className="min-h-screen bg-[#020617] text-slate-200 font-sans -m-4 sm:-m-8 pb-32 relative overflow-hidden selection:bg-indigo-500/30">
-            {/* Ambient Background */}
-            <div className="fixed top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-indigo-600/10 blur-[150px] pointer-events-none"></div>
-            <div className="fixed bottom-[-20%] right-[-10%] w-[60%] h-[60%] rounded-full bg-purple-600/10 blur-[150px] pointer-events-none"></div>
-
-            <div className="relative z-10 p-4 sm:p-8 max-w-7xl mx-auto">
-                {/* HEADER */}
-                <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 mb-8">
-                    <div className="flex items-center gap-4">
-                        <div className="bg-gradient-to-tr from-indigo-500 to-purple-600 p-3 rounded-2xl text-white shadow-xl shadow-indigo-500/20"><Icon name="Wallet" size={24}/></div>
-                        <div>
-                            <h2 className="text-2xl font-black text-white tracking-tight">Panel Financiero</h2>
-                            <p className="text-slate-400 text-sm font-medium">Gestión Integral</p>
-                        </div>
-                        <button onClick={()=>setShowBalance(!showBalance)} className="ml-2 p-2 rounded-full hover:bg-white/5 text-slate-500 hover:text-white transition-colors"><Icon name={showBalance?"Eye":"EyeOff"} size={18}/></button>
-                    </div>
-                    
-                    <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto bg-white/5 p-1.5 rounded-2xl border border-white/10 backdrop-blur-md">
-                        <div className="text-slate-300 [&>select]:bg-transparent [&>select]:text-white [&>select]:border-none [&>select]:font-bold [&>select]:outline-none px-2"><DateFilter currentDate={currentDate} onChange={setCurrentDate} /></div>
-                        <div className="w-px h-6 bg-white/10 mx-1"></div>
-                        {['dashboard','stats','list','goals'].map(t => (
-                            <button key={t} onClick={()=>setTabView(t)} 
-                                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all relative overflow-hidden ${tabView===t?'text-white shadow-lg':'text-slate-400 hover:text-white hover:bg-white/5'}`}>
-                                {tabView===t && <div className="absolute inset-0 bg-indigo-600 opacity-80"></div>}
-                                <span className="relative z-10 capitalize">{t === 'dashboard' ? 'Resumen' : t === 'stats' ? 'Gráficos' : t === 'list' ? 'Movimientos' : 'Metas'}</span>
-                            </button>
-                        ))}
-                        <button onClick={()=>{setForm({...initialForm, date: Utils.getLocalDate()}); setIsModalOpen(true)}} className="bg-white text-indigo-950 p-2 rounded-xl hover:bg-indigo-50 transition-all shadow-[0_0_15px_rgba(255,255,255,0.2)] active:scale-95 ml-1"><Icon name="Plus" size={18}/></button>
-                    </div>
+        <div className="flex flex-col h-full bg-slate-50">
+            {/* Header */}
+            <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Tesorería</h1>
+                    <p className="text-slate-500 font-medium">Gestión financiera integral</p>
                 </div>
+                <div className="flex flex-wrap gap-2">
+                    <DateFilter currentDate={currentDate} onChange={setCurrentDate} />
+                    <Button variant="secondary" onClick={() => setIsLocked(true)} icon="Shield" size="sm">Bloquear</Button>
+                </div>
+            </div>
 
-                {/* DASHBOARD */}
-                {tabView === 'dashboard' && (
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-enter">
-                        {/* 1. Main Balance Card (Restaurada Full) */}
-                        <div className="lg:col-span-2 bg-gradient-to-br from-indigo-900 to-[#0f172a] rounded-[32px] p-8 relative overflow-hidden shadow-2xl border border-white/10 group">
-                            <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl -mr-16 -mt-16 group-hover:bg-indigo-500/30 transition-all duration-700"></div>
+            {/* Navegación Tabs */}
+            <div className="flex gap-2 mb-6 overflow-x-auto pb-1 hide-scroll">
+                {[
+                    {id: 'dashboard', label: 'Resumen', icon: 'BarChart'},
+                    {id: 'list', label: 'Movimientos', icon: 'List'},
+                    {id: 'tithers', label: 'Diezmantes', icon: 'Users'},
+                    {id: 'funds', label: 'Sobres/Fondos', icon: 'Briefcase'}
+                ].map(t => (
+                    <button key={t.id} onClick={()=>setTab(t.id)} className={`px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all whitespace-nowrap ${tab===t.id ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/30' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50'}`}>
+                        <Icon name={t.icon} size={18}/> {t.label}
+                    </button>
+                ))}
+            </div>
+
+            {/* CONTENIDO PRINCIPAL */}
+            <div className="flex-1 overflow-y-auto">
+                
+                {/* 1. DASHBOARD */}
+                {tab === 'dashboard' && (
+                    <div className="space-y-6 animate-enter">
+                        {/* Balance Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="md:col-span-2 bg-slate-900 rounded-[2rem] p-8 text-white relative overflow-hidden shadow-xl">
+                                <div className="absolute top-0 right-0 w-64 h-64 bg-brand-500/20 rounded-full blur-3xl -mr-16 -mt-16"></div>
+                                <div className="relative z-10">
+                                    <p className="text-slate-400 font-bold uppercase tracking-widest text-xs mb-2">Balance Global Disponible</p>
+                                    <h2 className="text-5xl font-black mb-6 tracking-tight">{formatCurrency(balances.total)}</h2>
+                                    <div className="flex gap-6">
+                                        <div>
+                                            <span className="flex items-center gap-2 text-emerald-400 text-xs font-bold uppercase mb-1"><Icon name="DollarSign" size={14}/> Efectivo</span>
+                                            <p className="text-xl font-bold">{formatCurrency(balances.cash)}</p>
+                                        </div>
+                                        <div>
+                                            <span className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase mb-1"><Icon name="CreditCard" size={14}/> Banco</span>
+                                            <p className="text-xl font-bold">{formatCurrency(balances.bank)}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             
-                            <div className="relative z-10">
-                                <span className="text-indigo-200 text-xs font-bold uppercase tracking-widest border border-indigo-500/30 px-3 py-1 rounded-full bg-indigo-500/10">Balance Total</span>
-                                <h3 className={`text-5xl sm:text-6xl font-black text-white mt-4 mb-2 tracking-tight ${blurClass}`}>{showBalance ? formatCurrency(globalBalances.total) : '$ •••••••'}</h3>
-                                <p className="text-slate-400 text-sm mb-8">Saldo acumulado disponible</p>
-
-                                {/* Desglose Efectivo vs Banco */}
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="bg-white/5 p-4 rounded-2xl border border-white/5 backdrop-blur-sm hover:bg-white/10 transition-colors">
-                                        <div className="flex items-center gap-2 mb-2 text-emerald-400">
-                                            <Icon name="DollarSign" size={16}/> <span className="text-xs font-bold uppercase">Efectivo (Caja)</span>
-                                        </div>
-                                        <span className={`text-xl font-bold text-white ${blurClass}`}>{showBalance ? formatCurrency(globalBalances.cash) : '••••'}</span>
-                                    </div>
-                                    <div className="bg-white/5 p-4 rounded-2xl border border-white/5 backdrop-blur-sm hover:bg-white/10 transition-colors">
-                                        <div className="flex items-center gap-2 mb-2 text-blue-400">
-                                            <Icon name="CreditCard" size={16}/> <span className="text-xs font-bold uppercase">Banco / Digital</span>
-                                        </div>
-                                        <span className={`text-xl font-bold text-white ${blurClass}`}>{showBalance ? formatCurrency(globalBalances.bank) : '••••'}</span>
-                                    </div>
+                            <div className="bg-white rounded-[2rem] p-6 border border-slate-100 shadow-soft flex flex-col justify-center">
+                                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Icon name="Award" className="text-amber-500"/> Diezmo a la Asamblea</h3>
+                                <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 text-center mb-2">
+                                    <p className="text-xs text-amber-700 font-bold uppercase mb-1">El 10% de Ingresos del Mes</p>
+                                    <p className="text-3xl font-black text-amber-600">{formatCurrency(monthStats.titheToAssembly)}</p>
                                 </div>
+                                <p className="text-center text-xs text-slate-400">Basado en ingresos: {formatCurrency(monthStats.income)}</p>
                             </div>
                         </div>
 
-                        {/* 2. Monthly Summary Bars */}
-                        <div className="flex flex-col gap-4">
-                            <div className="flex-1 bg-[#1e293b]/50 backdrop-blur-md border border-white/10 rounded-[32px] p-6 relative overflow-hidden">
-                                <div className="absolute right-0 top-0 w-20 h-full bg-emerald-500/10 skew-x-12"></div>
-                                <div className="flex justify-between items-end relative z-10">
-                                    <div>
-                                        <span className="text-emerald-400 text-xs font-bold uppercase block mb-1">Ingresos (Mes)</span>
-                                        <span className={`text-2xl font-black text-white ${blurClass}`}>{showBalance ? formatCurrency(monthTotals.incomes) : '••••'}</span>
-                                    </div>
-                                    <div className="p-3 bg-emerald-500/20 rounded-xl text-emerald-400"><Icon name="ArrowUp" size={20}/></div>
-                                </div>
-                                <div className="mt-4 w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
-                                    <div className="h-full bg-emerald-500 shadow-[0_0_10px_#10b981]" style={{width: '70%'}}></div>
-                                </div>
-                            </div>
-
-                            <div className="flex-1 bg-[#1e293b]/50 backdrop-blur-md border border-white/10 rounded-[32px] p-6 relative overflow-hidden">
-                                <div className="absolute right-0 top-0 w-20 h-full bg-rose-500/10 skew-x-12"></div>
-                                <div className="flex justify-between items-end relative z-10">
-                                    <div>
-                                        <span className="text-rose-400 text-xs font-bold uppercase block mb-1">Gastos (Mes)</span>
-                                        <span className={`text-2xl font-black text-white ${blurClass}`}>{showBalance ? formatCurrency(monthTotals.expenses) : '••••'}</span>
-                                    </div>
-                                    <div className="p-3 bg-rose-500/20 rounded-xl text-rose-400"><Icon name="ArrowDown" size={20}/></div>
-                                </div>
-                                <div className="mt-4 w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
-                                    <div className="h-full bg-rose-500 shadow-[0_0_10px_#f43f5e]" style={{width: '40%'}}></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* 3. Daily Trend Chart (Mini) */}
-                        <div className="lg:col-span-3 bg-[#0f172a]/40 backdrop-blur-md border border-white/5 rounded-[32px] p-6">
-                            <div className="flex justify-between items-center mb-4">
-                                <h4 className="text-white font-bold flex items-center gap-2"><Icon name="BarChart" size={16} className="text-indigo-400"/> Actividad Diaria</h4>
-                                <span className="text-xs text-slate-500 uppercase font-bold">Últimos 30 días</span>
-                            </div>
-                            <div className={`h-40 w-full ${blurClass}`}>
-                                <canvas ref={chartRefs.trend}></canvas>
-                            </div>
+                        {/* Estadísticas Mensuales */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <Card className="text-center">
+                                <p className="text-xs text-slate-400 uppercase font-bold mb-1">Ingresos (Mes)</p>
+                                <p className="text-2xl font-black text-emerald-600">{formatCurrency(monthStats.income)}</p>
+                            </Card>
+                            <Card className="text-center">
+                                <p className="text-xs text-slate-400 uppercase font-bold mb-1">Gastos (Mes)</p>
+                                <p className="text-2xl font-black text-red-500">{formatCurrency(monthStats.expense)}</p>
+                            </Card>
+                            <Card className="text-center">
+                                <p className="text-xs text-slate-400 uppercase font-bold mb-1">Neto (Mes)</p>
+                                <p className={`text-2xl font-black ${monthStats.net >= 0 ? 'text-slate-800' : 'text-red-500'}`}>{formatCurrency(monthStats.net)}</p>
+                            </Card>
+                            <Card className="text-center">
+                                <p className="text-xs text-slate-400 uppercase font-bold mb-1">Familias Diezmantes</p>
+                                <p className="text-2xl font-black text-brand-600">{tithersThisMonth}</p>
+                            </Card>
                         </div>
                     </div>
                 )}
 
-                {/* STATS VIEW (NUEVA PESTAÑA) */}
-                {tabView === 'stats' && (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-enter">
-                        {/* Gráfico 1: Proyección */}
-                        <div className="bg-[#1e293b]/50 border border-white/10 rounded-[32px] p-6">
-                            <h4 className="text-white font-bold mb-4 flex items-center gap-2"><Icon name="TrendingUp" className="text-indigo-400"/> Proyección de Cierre</h4>
-                            <div className={`h-64 ${blurClass}`}><canvas ref={chartRefs.projection}></canvas></div>
-                            <p className="text-center text-xs text-slate-400 mt-4">Estimación basada en el flujo actual del mes.</p>
-                        </div>
-
-                        {/* Gráfico 2: Breakdown */}
-                        <div className="bg-[#1e293b]/50 border border-white/10 rounded-[32px] p-6">
-                            <h4 className="text-white font-bold mb-4 flex items-center gap-2"><Icon name="PieChart" className="text-pink-400"/> Distribución de Gastos</h4>
-                            <div className={`h-64 flex justify-center ${blurClass}`}><canvas ref={chartRefs.breakdown}></canvas></div>
-                        </div>
-
-                        {/* Gráfico 3: Comparativa Diaria */}
-                        <div className="lg:col-span-2 bg-[#1e293b]/50 border border-white/10 rounded-[32px] p-6">
-                            <h4 className="text-white font-bold mb-4 flex items-center gap-2"><Icon name="Activity" className="text-emerald-400"/> Flujo Diario (Ingresos vs Gastos)</h4>
-                            <div className={`h-64 ${blurClass}`}><canvas ref={chartRefs.daily}></canvas></div>
-                        </div>
-                    </div>
-                )}
-
-                {/* LIST VIEW */}
-                {tabView === 'list' && (
-                    <div className="animate-enter space-y-6">
-                        <div className="sticky top-0 z-40 bg-[#020617]/90 backdrop-blur-xl p-4 rounded-3xl border border-white/10 shadow-2xl">
-                            <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-                                <div className="flex items-center gap-3 w-full md:w-auto flex-1">
-                                    <div className="relative w-full md:max-w-md">
-                                        <Icon name="Search" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18}/>
-                                        <input className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all" 
-                                            placeholder="Buscar..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
-                                    </div>
-                                </div>
-                                <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 hide-scrollbar">
-                                    {[ {id:'all',l:'Todo'}, {id:'income',l:'Ingresos'}, {id:'expense',l:'Gastos'}, {id:'recurring',l:'Fijos'} ].map(f => (
-                                        <button key={f.id} onClick={()=>setFilterType(f.id)} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap border transition-all ${filterType===f.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-transparent border-white/10 text-slate-400 hover:bg-white/5'}`}>{f.l}</button>
-                                    ))}
-                                    <div className="w-px h-8 bg-white/10 mx-2"></div>
-                                    <button onClick={handleExportCSV} className="px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center gap-2"><Icon name="Download" size={16}/> CSV</button>
-                                    <button onClick={selectAll} className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-300 text-xs font-bold flex items-center gap-2"><Icon name="CheckSquare" size={16}/> {selectedIds.length>0?'Nada':'Todo'}</button>
-                                </div>
+                {/* 2. LISTA DE MOVIMIENTOS */}
+                {tab === 'list' && (
+                    <div className="animate-enter">
+                        <div className="flex justify-between items-center mb-4">
+                            <Input placeholder="Buscar movimiento..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="max-w-xs" />
+                            <div className="flex gap-2">
+                                <Button onClick={() => { setModalMode('transaction'); setEditingId(null); setForm(initialForm); }} icon="Plus">Movimiento</Button>
+                                <Button onClick={() => { setModalMode('culto'); setEditingId(null); setCultoForm(initialCulto); }} icon="Home" variant="secondary">Cargar Culto</Button>
                             </div>
                         </div>
 
-                        {monthlyData.length === 0 ? <div className="text-center py-20 opacity-50"><p>Sin movimientos</p></div> : (
-                            <div className="grid grid-cols-1 gap-3">
-                                {monthlyData.map(f => {
-                                    const isSelected = selectedIds.includes(f.id);
-                                    const isIncome = safeNum(f.total||f.amount) > 0;
-                                    const amount = safeNum(f.total||f.amount);
-                                    const isExpanded = expandedId === f.id;
-
-                                    return (
-                                        <div key={f.id} onClick={() => setExpandedId(isExpanded ? null : f.id)}
-                                            className={`group relative bg-white/5 border ${isSelected ? 'border-indigo-500 bg-indigo-500/10' : 'border-white/5 hover:border-white/20'} rounded-2xl transition-all duration-300 overflow-hidden cursor-pointer`}>
-                                            <div className="p-4 flex items-center gap-4">
-                                                <div onClick={(e)=>e.stopPropagation()}><input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(f.id)} className="w-5 h-5 rounded border-slate-600 bg-slate-800/50 checked:bg-indigo-500 cursor-pointer"/></div>
-                                                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-inner flex-shrink-0 ${isIncome ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-                                                    <Icon name={f.type==='Culto'?'Church':(categories.find(c=>c.value===f.category)?.icon || 'Hash')} />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex justify-between items-start">
-                                                        <div className="flex items-center gap-2">
-                                                            <h4 className="text-white font-bold truncate">{f.type==='Culto'?'Culto General':f.category}</h4>
-                                                            {f.isRecurring && <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30">FIJO</span>}
-                                                        </div>
-                                                        <span className={`font-mono font-bold ${isIncome?'text-emerald-400':'text-rose-400'} ${blurClass}`}>{showBalance ? formatCurrency(amount) : '••••'}</span>
+                        <div className="bg-white rounded-3xl shadow-soft border border-slate-100 overflow-hidden">
+                            {monthlyData.length === 0 ? (
+                                <div className="p-12 text-center text-slate-400">No hay movimientos en este mes.</div>
+                            ) : (
+                                <div className="divide-y divide-slate-100">
+                                    {monthlyData.filter(f => f.category?.toLowerCase().includes(searchTerm.toLowerCase()) || f.notes?.toLowerCase().includes(searchTerm.toLowerCase())).map(item => {
+                                        const isIncome = safeNum(item.total||item.amount) > 0;
+                                        return (
+                                            <div key={item.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between group">
+                                                <div className="flex items-center gap-4">
+                                                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl ${item.type==='Culto' ? 'bg-brand-100 text-brand-600' : (isIncome ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-500')}`}>
+                                                        <Icon name={item.type==='Culto'?'Home':(isIncome?'ArrowUp':'ArrowRight')} />
                                                     </div>
-                                                    <div className="flex justify-between items-end mt-1">
-                                                        <p className="text-slate-500 text-xs truncate max-w-[200px]">{f.notes || f.method}</p>
-                                                        <span className="text-slate-600 text-[10px] font-medium uppercase tracking-wide">{formatDate(f.date)}</span>
+                                                    <div>
+                                                        <h4 className="font-bold text-slate-800">{item.type==='Culto' ? 'Culto General' : item.category}</h4>
+                                                        <p className="text-xs text-slate-500 flex items-center gap-2">
+                                                            {formatDate(item.date)} • {item.method || 'Mixto'} 
+                                                            {item.fundId && <Badge type="brand">Fondo Asignado</Badge>}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="text-right flex items-center gap-4">
+                                                    <div>
+                                                        <p className={`font-bold font-mono ${isIncome ? 'text-emerald-600' : 'text-red-500'}`}>{formatCurrency(item.total || item.amount)}</p>
+                                                        {item.type==='Culto' && <p className="text-[10px] text-slate-400">Ofrendas + Diezmos</p>}
+                                                    </div>
+                                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <button onClick={()=>prepareEdit(item)} className="p-2 hover:bg-slate-200 rounded-lg text-slate-500"><Icon name="Edit" size={16}/></button>
+                                                        <button onClick={()=>handleDelete(item.id)} className="p-2 hover:bg-red-100 rounded-lg text-red-500"><Icon name="Trash" size={16}/></button>
                                                     </div>
                                                 </div>
                                             </div>
-                                            <div className={`bg-black/20 border-t border-white/5 transition-all duration-300 ${isExpanded ? 'max-h-48 opacity-100 p-4' : 'max-h-0 opacity-0 overflow-hidden'}`}>
-                                                <div className="flex justify-end gap-3"><button onClick={(e)=>{e.stopPropagation(); handleExportPDF(f)}} className="text-white bg-indigo-600 px-3 py-1.5 rounded-lg text-xs font-bold flex gap-2"><Icon name="Printer" size={14}/> Imprimir PDF</button></div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
 
-                {/* GOALS VIEW (Sobres Digitales) */}
-                {tabView === 'goals' && (
+                {/* 3. DIEZMANTES */}
+                {tab === 'tithers' && (
                     <div className="animate-enter space-y-6">
-                        {/* Resumen de Sobres */}
-                        <div className="bg-gradient-to-r from-indigo-900/50 to-purple-900/50 p-6 rounded-[32px] border border-white/10">
-                            <h3 className="text-white font-bold mb-4">Distribución de Fondos</h3>
-                            <div className="flex gap-8">
-                                <div>
-                                    <span className="text-slate-400 text-xs uppercase font-bold">Total Asignado (Sobres)</span>
-                                    <p className={`text-2xl font-black text-emerald-400 ${blurClass}`}>{formatCurrency(totalAllocated)}</p>
-                                </div>
-                                <div>
-                                    <span className="text-slate-400 text-xs uppercase font-bold">Total Libre</span>
-                                    <p className={`text-2xl font-black text-white ${blurClass}`}>{formatCurrency(freeBalance)}</p>
-                                </div>
+                        <Card>
+                            <h3 className="font-bold text-lg mb-4 text-slate-800">Historial de Fidelidad</h3>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr className="text-xs text-slate-400 uppercase border-b border-slate-100">
+                                            <th className="py-3 pl-4 font-bold">Familia / Persona</th>
+                                            <th className="py-3 font-bold text-center">Frecuencia</th>
+                                            <th className="py-3 font-bold text-right">Último Aporte</th>
+                                            <th className="py-3 pr-4 font-bold text-right">Total Acumulado</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="text-sm">
+                                        {tithersStats.map(t => (
+                                            <tr key={t.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                                                <td className="py-3 pl-4 font-bold text-slate-700 capitalize">{t.display}</td>
+                                                <td className="py-3 text-center"><Badge>{t.count} veces</Badge></td>
+                                                <td className="py-3 text-right text-slate-500">{formatDate(t.lastDate)}</td>
+                                                <td className="py-3 pr-4 text-right font-mono font-bold text-emerald-600">{formatCurrency(t.total)}</td>
+                                            </tr>
+                                        ))}
+                                        {tithersStats.length === 0 && <tr><td colSpan="4" className="py-8 text-center text-slate-400">No hay registros de diezmos detallados aún.</td></tr>}
+                                    </tbody>
+                                </table>
                             </div>
-                            <div className="w-full bg-white/10 h-2 rounded-full mt-4 overflow-hidden flex">
-                                <div className="bg-emerald-500 h-full" style={{width: `${(totalAllocated/globalBalances.total)*100}%`}}></div>
-                            </div>
+                        </Card>
+                    </div>
+                )}
+
+                {/* 4. SOBRES / FONDOS */}
+                {tab === 'funds' && (
+                    <div className="animate-enter">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="font-bold text-xl text-slate-800">Sobres y Presupuestos</h3>
+                            <Button size="sm" icon="Plus" onClick={()=>{setFundForm({id:null, name:'', type:'saving', target:''}); setModalMode('fund')}}>Crear Fondo</Button>
                         </div>
 
-                        <div className="flex justify-end"><button onClick={()=>setIsGoalModalOpen(true)} className="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2"><Icon name="PlusCircle" size={18}/> Crear Meta/Sobre</button></div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {goals.map(g => {
-                                const { current, target, pct } = getGoalProgress(g);
-                                const isSaving = g.type === 'saving';
-                                const colorClass = isSaving ? 'text-emerald-400' : 'text-orange-400';
-                                const barColor = isSaving ? '#10b981' : '#f97316';
-                                
-                                return (
-                                    <div key={g.id} className="bg-white/5 border border-white/5 rounded-3xl p-6 relative overflow-hidden group">
-                                        <div className="flex justify-between items-start mb-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`p-3 rounded-2xl ${isSaving?'bg-emerald-500/20':'bg-orange-500/20'} ${colorClass}`}><Icon name={isSaving?'Archive':'AlertCircle'} size={24}/></div>
-                                                <div>
-                                                    <h4 className="text-white font-bold">{g.label || g.category}</h4>
-                                                    <p className="text-slate-500 text-xs uppercase font-bold">{isSaving ? 'Sobre de Ahorro' : 'Límite de Gasto'}</p>
-                                                </div>
+                            {fundsStatus.map(f => (
+                                <div key={f.id} className="bg-white border border-slate-200 rounded-2xl p-5 hover:shadow-md transition-all group relative">
+                                    <div className="flex justify-between items-start mb-3">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`p-3 rounded-xl ${f.type==='saving' ? 'bg-indigo-100 text-indigo-600' : 'bg-orange-100 text-orange-600'}`}>
+                                                <Icon name={f.type==='saving'?'Briefcase':'AlertCircle'} />
                                             </div>
-                                            {isSaving && <button onClick={()=>handleDeleteGoal(g.id)} className="text-slate-600 hover:text-red-400"><Icon name="Trash" size={16}/></button>}
+                                            <div>
+                                                <h4 className="font-bold text-slate-800">{f.name}</h4>
+                                                <p className="text-xs text-slate-500 uppercase font-bold">{f.type==='saving'?'Acumulativo':'Límite de Gasto'}</p>
+                                            </div>
                                         </div>
-                                        <div className="relative h-3 bg-white/5 rounded-full overflow-hidden mb-4"><div className="absolute h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: barColor, boxShadow: `0 0 15px ${barColor}` }}></div></div>
-                                        <div className="flex justify-between text-xs font-bold text-slate-400"><span>{isSaving?'Guardado':'Gastado'}: <span className={`text-white ${blurClass}`}>{formatCurrency(current)}</span></span><span>Meta: {formatCurrency(target)}</span></div>
+                                        <button onClick={()=>deleteFund(f.id)} className="text-slate-300 hover:text-red-500"><Icon name="Trash" size={16}/></button>
                                     </div>
-                                );
-                            })}
+                                    
+                                    <div className="mb-2">
+                                        <p className="text-2xl font-black text-slate-800">{formatCurrency(f.current)}</p>
+                                        {f.target && <p className="text-xs text-slate-400">Meta: {formatCurrency(f.target)}</p>}
+                                    </div>
+                                    
+                                    {f.target && (
+                                        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                            <div className={`h-full ${f.type==='saving'?'bg-indigo-500':'bg-orange-500'}`} style={{width: `${Math.min((f.current/f.target)*100, 100)}%`}}></div>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
                         </div>
                     </div>
                 )}
             </div>
 
-            {/* ACTION BAR FIXED */}
-            {selectedIds.length > 0 && <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-white/10 backdrop-blur-xl border border-white/20 p-2 rounded-full flex gap-4 shadow-2xl"><span className="text-white font-bold px-4 py-2">{selectedIds.length} seleccionados</span><button onClick={handleBulkDelete} className="bg-red-500 text-white px-6 rounded-full font-bold flex items-center gap-2"><Icon name="Trash2" size={18}/> Eliminar</button></div>}
+            {/* --- MODALES --- */}
 
-            {/* MODAL REGISTRO + ALLOCATION */}
-            <Modal isOpen={isModalOpen} onClose={()=>setIsModalOpen(false)} title="Nueva Operación">
-                <div className="space-y-5">
-                    <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1 rounded-xl">
-                        {['Culto','Gasto','Ingreso'].map(t=><button key={t} onClick={()=>setForm({...initialForm, type:t})} className={`py-2 text-xs font-black uppercase rounded-lg transition-all ${form.type===t?'bg-white text-indigo-900 shadow':'text-slate-400'}`}>{t}</button>)}
+            {/* MODAL TRANSACCIÓN (Ingreso/Gasto) */}
+            <Modal isOpen={modalMode === 'transaction'} onClose={()=>setModalMode(null)} title={editingId ? "Editar Movimiento" : "Nuevo Movimiento"}>
+                <div className="space-y-4">
+                    <div className="bg-slate-100 p-1 rounded-xl flex">
+                        {['Ingreso','Gasto'].map(t => (
+                            <button key={t} onClick={()=>setForm({...form, type:t})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${form.type===t ? 'bg-white shadow text-brand-600' : 'text-slate-500'}`}>{t}</button>
+                        ))}
                     </div>
-                    <Input type="date" value={form.date} onChange={e=>setForm({...form, date:e.target.value})}/>
-                    
-                    {form.type==='Culto' ? (
-                        <div className="space-y-4">
-                            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200"><span className="text-xs font-bold text-slate-400 uppercase block mb-2">Efectivo</span><div className="grid grid-cols-2 gap-3"><Input label="Diezmos" type="number" value={form.tithesCash} onChange={e=>setForm({...form, tithesCash:e.target.value})}/><Input label="Ofrendas" type="number" value={form.offeringsCash} onChange={e=>setForm({...form, offeringsCash:e.target.value})}/></div></div>
-                            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200"><span className="text-xs font-bold text-slate-400 uppercase block mb-2">Digital</span><div className="grid grid-cols-2 gap-3"><Input label="Diezmos" type="number" value={form.tithesTransfer} onChange={e=>setForm({...form, tithesTransfer:e.target.value})}/><Input label="Ofrendas" type="number" value={form.offeringsTransfer} onChange={e=>setForm({...form, offeringsTransfer:e.target.value})}/></div></div>
-                        </div>
-                    ) : (
-                        <>
-                            <div className="grid grid-cols-2 gap-4"><Input label="Monto" type="number" value={form.amount} onChange={e=>setForm({...form, amount:e.target.value})} className="font-mono text-xl font-bold"/><Select label="Método" value={form.method} onChange={e=>setForm({...form, method:e.target.value})}><option>Efectivo</option><option>Banco</option></Select></div>
-                            <SmartSelect label="Categoría" options={categories} value={form.category} onChange={v=>setForm({...form, category:v})}/>
-                            {form.type === 'Gasto' && (
-                                <div className="flex items-center gap-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100 cursor-pointer" onClick={()=>setForm({...form, isRecurring: !form.isRecurring})}>
-                                    <div className={`w-5 h-5 rounded border flex items-center justify-center ${form.isRecurring ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'}`}>{form.isRecurring && <Icon name="Check" size={12} className="text-white"/>}</div>
-                                    <span className="text-sm font-bold text-indigo-900">¿Es un Gasto Fijo Mensual?</span>
-                                </div>
-                            )}
-                        </>
-                    )}
+                    <Input label="Fecha" type="date" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} />
+                    <Input label="Monto" type="number" placeholder="0.00" value={form.amount} onChange={e=>setForm({...form, amount:e.target.value})} className="font-mono text-lg font-bold" />
+                    <div className="grid grid-cols-2 gap-4">
+                        <Select label="Categoría" value={form.category} onChange={e=>setForm({...form, category:e.target.value})}>
+                            <option>General</option><option>Alquiler</option><option>Servicios</option><option>Mantenimiento</option><option>Ayuda Social</option><option>Ofrenda Misionera</option><option>Ministerios</option><option>Honorarios</option><option>Varios</option>
+                        </Select>
+                        <Select label="Método" value={form.method} onChange={e=>setForm({...form, method:e.target.value})}>
+                            <option>Efectivo</option><option>Banco</option>
+                        </Select>
+                    </div>
+                    <div className="bg-brand-50 p-4 rounded-xl border border-brand-100">
+                        <label className="text-xs font-bold text-brand-700 uppercase mb-2 block">Asignar a Fondo/Sobre (Opcional)</label>
+                        <select className="w-full bg-white border border-brand-200 rounded-lg p-2 text-sm" value={form.fundId} onChange={e=>setForm({...form, fundId:e.target.value})}>
+                            <option value="">-- Ninguno --</option>
+                            {fundsConfig.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                        </select>
+                        <p className="text-[10px] text-brand-600 mt-1">Si seleccionas uno, el dinero se sumará/restará virtualmente a este sobre.</p>
+                    </div>
+                    <Input label="Notas" value={form.notes} onChange={e=>setForm({...form, notes:e.target.value})} />
+                    <Button onClick={handleSaveTransaction} className="w-full mt-4">Guardar</Button>
+                </div>
+            </Modal>
 
-                    {/* ALLOCATION LOGIC (DESTINAR A META) */}
-                    {(form.type === 'Ingreso' || form.type === 'Culto') && goals.some(g=>g.type==='saving') && (
-                         <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl">
-                            <p className="text-xs font-bold text-emerald-600 uppercase mb-2">¿Destinar parte a un Sobre/Meta?</p>
-                            <div className="flex gap-2 mb-2">
-                                <select className="w-full p-2 rounded-lg border border-emerald-200 text-sm" value={form.allocateToGoalId} onChange={e=>setForm({...form, allocateToGoalId:e.target.value})}>
-                                    <option value="">-- No Asignar --</option>
-                                    {goals.filter(g=>g.type==='saving').map(g=><option key={g.id} value={g.id}>{g.label || g.category}</option>)}
+            {/* MODAL CULTO COMPLETO */}
+            <Modal isOpen={modalMode === 'culto'} onClose={()=>setModalMode(null)} title="Registro de Culto">
+                <div className="space-y-6">
+                    <Input type="date" value={cultoForm.date} onChange={e=>setCultoForm({...cultoForm, date:e.target.value})} />
+                    
+                    {/* Sección 1: Ofrendas */}
+                    <Card className="bg-slate-50 border-slate-200">
+                        <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2"><Icon name="DollarSign" size={16}/> Ofrendas Generales</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <Input label="Efectivo" type="number" placeholder="0" value={cultoForm.offeringsCash} onChange={e=>setCultoForm({...cultoForm, offeringsCash:e.target.value})} />
+                            <Input label="Transferencia" type="number" placeholder="0" value={cultoForm.offeringsTransfer} onChange={e=>setCultoForm({...cultoForm, offeringsTransfer:e.target.value})} />
+                        </div>
+                    </Card>
+
+                    {/* Sección 2: Diezmos Detallados */}
+                    <Card className="bg-indigo-50 border-indigo-100">
+                        <h4 className="font-bold text-indigo-900 mb-3 flex items-center gap-2"><Icon name="Users" size={16}/> Detalle de Diezmos</h4>
+                        
+                        {/* Input para agregar */}
+                        <div className="bg-white p-3 rounded-xl border border-indigo-100 shadow-sm mb-4 space-y-3">
+                            <Input placeholder="Nombre Familia / Persona" value={titherInput.name} onChange={e=>setTitherInput({...titherInput, name:e.target.value})} />
+                            <div className="flex gap-2">
+                                <Input type="number" placeholder="Monto" value={titherInput.amount} onChange={e=>setTitherInput({...titherInput, amount:e.target.value})} className="flex-1" />
+                                <select className="bg-slate-100 rounded-xl px-3 text-sm font-bold text-slate-600 outline-none" value={titherInput.method} onChange={e=>setTitherInput({...titherInput, method:e.target.value})}>
+                                    <option>Efectivo</option><option>Banco</option>
                                 </select>
                             </div>
-                            {form.allocateToGoalId && <Input label="Monto a Destinar" type="number" value={form.allocationAmount} onChange={e=>setForm({...form, allocationAmount:e.target.value})} />}
-                         </div>
-                    )}
+                            <Input placeholder="Pedido de Oración (Opcional)" value={titherInput.prayer} onChange={e=>setTitherInput({...titherInput, prayer:e.target.value})} />
+                            <Button onClick={addTitherToCulto} size="sm" variant="secondary" className="w-full border-indigo-200 text-indigo-600 hover:bg-indigo-50">Agregar a la Lista</Button>
+                        </div>
 
-                    <Input label="Notas" value={form.notes} onChange={e=>setForm({...form, notes:e.target.value})}/>
-                    
-                    {/* INPUT IMAGEN CORREGIDO */}
-                    <div className="flex gap-3">
-                        <label className={`flex-1 p-3 border-2 border-dashed rounded-xl flex justify-center items-center gap-2 cursor-pointer transition-colors ${form.attachmentUrl?'border-emerald-500 bg-emerald-50 text-emerald-600':'border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`}>
-                            {isUploading ? <Icon name="Loader" className="animate-spin" size={18}/> : <Icon name={form.attachmentUrl?"Check":"Camera"} size={18}/>}
-                            <span>{isUploading ? 'Procesando...' : form.attachmentUrl ? 'Imagen Lista' : 'Adjuntar Comprobante'}</span>
-                            <input type="file" className="hidden" accept="image/*" onChange={handleImage} disabled={isUploading}/>
-                        </label>
+                        {/* Lista temporal */}
+                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+                            {cultoForm.tithesDetails.length === 0 && <p className="text-center text-xs text-indigo-400 py-2">Sin diezmos cargados aún.</p>}
+                            {cultoForm.tithesDetails.map((t, idx) => (
+                                <div key={t.id || idx} className="flex justify-between items-center bg-white p-2 rounded-lg border border-indigo-50 shadow-sm text-sm">
+                                    <div>
+                                        <span className="font-bold text-slate-700 block">{t.name}</span>
+                                        <span className="text-xs text-slate-400">{t.method} {t.prayer && `• Oración: ${t.prayer}`}</span>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <span className="font-mono font-bold text-indigo-600">{formatCurrency(t.amount)}</span>
+                                        <button onClick={()=>removeTither(t.id)} className="text-red-400 hover:text-red-600"><Icon name="X" size={14}/></button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </Card>
+
+                    {/* Resumen Total */}
+                    <div className="flex justify-between items-center px-4 py-3 bg-slate-900 text-white rounded-xl">
+                        <span className="font-bold uppercase text-xs">Total Culto</span>
+                        <span className="font-black text-xl">
+                            {formatCurrency(safeNum(cultoForm.offeringsCash) + safeNum(cultoForm.offeringsTransfer) + cultoForm.tithesDetails.reduce((a,b)=>a+safeNum(b.amount),0))}
+                        </span>
                     </div>
-                    
-                    <Button className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-xl" onClick={handleSave} disabled={isUploading}>Guardar Operación</Button>
+
+                    <Button onClick={handleSaveCulto} className="w-full">Guardar Culto Completo</Button>
                 </div>
             </Modal>
 
-            {/* MODAL METAS */}
-            <Modal isOpen={isGoalModalOpen} onClose={()=>setIsGoalModalOpen(false)} title="Nueva Meta / Sobre">
-                <div className="space-y-5">
-                    <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl">
-                        <button onClick={()=>setGoalForm({...goalForm, type:'spending'})} className={`py-2 text-xs font-black uppercase rounded-lg ${goalForm.type==='spending'?'bg-white text-orange-500 shadow':'text-slate-400'}`}>Límite Gasto</button>
-                        <button onClick={()=>setGoalForm({...goalForm, type:'saving'})} className={`py-2 text-xs font-black uppercase rounded-lg ${goalForm.type==='saving'?'bg-white text-emerald-500 shadow':'text-slate-400'}`}>Sobre Ahorro</button>
-                    </div>
-                    <Input label="Nombre (ej: Sueldo Pastor)" value={goalForm.label} onChange={e=>setGoalForm({...goalForm, label:e.target.value})}/>
-                    <SmartSelect label="Categoría" options={categories} value={goalForm.category} onChange={v=>setGoalForm({...goalForm, category:v})}/>
-                    <div className="bg-slate-50 p-4 rounded-xl text-center border border-slate-200"><p className="text-xs text-slate-500 mb-2 uppercase font-bold">Monto Objetivo</p><Input type="number" value={goalForm.amount} onChange={e=>setGoalForm({...goalForm, amount:e.target.value})} className="text-center text-4xl font-black bg-transparent border-none outline-none text-slate-800"/></div>
-                    {/* Campo para saldo inicial manual en ahorro */}
-                    {goalForm.type === 'saving' && <Input label="Saldo Inicial en el Sobre" type="number" value={goalForm.currentSaved} onChange={e=>setGoalForm({...goalForm, currentSaved:e.target.value})} />}
-                    <Button className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold" onClick={handleSaveGoal}>Crear</Button>
+            {/* MODAL FONDOS */}
+            <Modal isOpen={modalMode === 'fund'} onClose={()=>setModalMode(null)} title="Configurar Fondo">
+                <div className="space-y-4">
+                    <Input label="Nombre del Sobre/Fondo" placeholder="Ej: Ahorro Templo, Jóvenes..." value={fundForm.name} onChange={e=>setFundForm({...fundForm, name:e.target.value})} />
+                    <Select label="Tipo" value={fundForm.type} onChange={e=>setFundForm({...fundForm, type:e.target.value})}>
+                        <option value="saving">Ahorro / Acumulativo</option>
+                        <option value="limit">Límite de Gasto / Presupuesto</option>
+                    </Select>
+                    <Input label="Meta / Límite (Opcional)" type="number" value={fundForm.target} onChange={e=>setFundForm({...fundForm, target:e.target.value})} />
+                    <Button onClick={saveFund} className="w-full">Guardar Configuración</Button>
                 </div>
             </Modal>
 
-            {/* PDF HIDDEN */}
-            {pdfData && <div ref={printRef} style={{display:'none',width:'100mm',background:'white',padding:'30px',color:'#1e293b'}}>
-                <div style={{background:'#4f46e5',height:'5px',marginBottom:'20px'}}></div>
-                <h1 style={{fontSize:'18px',fontWeight:'900',color:'#4f46e5'}}>CONQUISTADORES</h1>
-                <p style={{fontSize:'10px',color:'#94a3b8'}}>COMPROBANTE OFICIAL</p>
-                <div style={{margin:'30px 0',textAlign:'center'}}><h2 style={{fontSize:'36px',fontWeight:'900'}}>{formatCurrency(pdfData.total||pdfData.amount)}</h2></div>
-                <div style={{borderTop:'1px dashed #e2e8f0',paddingTop:'10px',fontSize:'12px'}}><p><strong>Fecha:</strong> {formatDate(pdfData.date)}</p><p><strong>Concepto:</strong> {pdfData.category}</p><p><strong>Notas:</strong> {pdfData.notes}</p></div>
-            </div>}
         </div>
     );
 };
