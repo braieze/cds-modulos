@@ -18,7 +18,9 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     const [filterType, setFilterType] = useState('all');
     const [expandedId, setExpandedId] = useState(null);
     const [selectedIds, setSelectedIds] = useState([]);
-    const [titherFilter, setTitherFilter] = useState('month'); // Filtro para diezmantes
+    
+    // Filtro específico para la pestaña de Diezmantes
+    const [titherFilter, setTitherFilter] = useState('month'); // 'month', 'year', 'all'
 
     // SEGURIDAD PIN (CLAVE 2367)
     const [isLocked, setIsLocked] = useState(true);
@@ -47,7 +49,11 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         // CONFIGURACIÓN EXTRA
         isRecurring: false, 
         allocateToGoalId: '', 
-        allocationAmount: ''
+        allocationAmount: '',
+        
+        // TRANSFERENCIA
+        fromFund: 'General',
+        toFund: ''
     };
     const [form, setForm] = useState(initialForm);
 
@@ -55,7 +61,6 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     const [tempEnvelope, setTempEnvelope] = useState({ family: '', amount: '', prayer: '', method: 'Efectivo' });
 
     // --- FONDOS / METAS (Simulados con persistencia local) ---
-    // Idealmente esto iría a una colección 'funds' en Firebase en el futuro
     const [funds, setFunds] = useState(() => {
         const saved = localStorage.getItem('church_funds_v1');
         return saved ? JSON.parse(saved) : [{ id: 'general', name: 'Caja General', balance: 0, icon: 'Wallet', color: 'bg-indigo-500', type: 'saving' }];
@@ -125,6 +130,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     }, [finances, currentDate, searchTerm, filterType]);
 
     // 2. Totales Mensuales y Diezmo Nacional (10%)
+    // RENOMBRADO A 'stats' PARA UNIFICAR CRITERIOS
     const stats = useMemo(() => {
         let incomes = 0, expenses = 0;
         
@@ -238,6 +244,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         if (today.getMonth() === currentDate.getMonth() && cumulative.length > 0) {
             const daysPassed = today.getDate();
             const avgDaily = runningTotal / daysPassed;
+            // Aquí referenciamos 'end' que se usará en el useEffect
             projection = { current: runningTotal, end: runningTotal + (avgDaily * (daysInMonth - daysPassed)) };
         }
 
@@ -269,7 +276,8 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                 type: 'line', 
                 data: { 
                     labels: ['Inicio', 'Hoy', 'Fin'], 
-                    datasets: [{ label: 'Proyección', data: [0, monthTotals.net, chartData.projection?.end || monthTotals.net], borderColor: '#818cf8', fill: true, backgroundColor: gradient }] 
+                    // AQUÍ ESTABA EL ERROR: 'monthTotals' no existía, ahora usamos 'stats'
+                    datasets: [{ label: 'Proyección', data: [0, stats.net, chartData.projection?.end || stats.net], borderColor: '#818cf8', fill: true, backgroundColor: gradient }] 
                 },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
             });
@@ -297,11 +305,11 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             });
         }
         return () => Object.values(chartInstances.current).forEach(c => c && c.destroy());
-    }, [chartData, tabView, monthTotals]);
+    }, [chartData, tabView, stats]); // Dependencia cambiada de monthTotals a stats
 
-    // --- LÓGICA DE PIN Y BLOQUEO (REPARADA) ---
+    // --- LÓGICA DE PIN Y BLOQUEO (FUNCION DEFINIDA ANTES DE USAR) ---
     
-    // Esta es la función que faltaba y causaba el error
+    // Función para manejar el clic fuera (definida antes del return)
     const handleBackgroundClick = () => {
         if (isLocked && pinInputRef.current) {
             pinInputRef.current.focus();
@@ -409,7 +417,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
 
         try {
             if (form.id) {
-                // AQUÍ USAMOS UPDATE DATA PASADO POR PROPS
+                // Asegurarse de que updateData viene de props
                 await updateData('finances', form.id, payload);
             } else {
                 await addData('finances', payload);
@@ -444,11 +452,12 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     const getGoalProgress = (goal) => {
         const target = safeNum(goal.amount);
         let current = safeNum(goal.currentSaved); 
+        // Aquí podrías agregar lógica para sumar movimientos automáticos si quisieras
         const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
         return { current, target, pct };
     };
 
-    // --- MANEJADORES DE SOBRES (DIEZMOS) ---
+    // --- SUB-HANDLERS ---
     const handleAddEnvelope = () => {
         if (!tempEnvelope.amount) return;
         setForm(prev => ({
@@ -458,29 +467,16 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         setTempEnvelope({ family: '', amount: '', prayer: '', method: 'Efectivo' });
     };
 
+    const handleEditEnvelope = (idx, field, value) => {
+        const updated = [...form.titheEnvelopes];
+        updated[idx] = { ...updated[idx], [field]: value };
+        setForm(prev => ({ ...prev, titheEnvelopes: updated }));
+    };
+
     const removeEnvelope = (idx) => {
         setForm(prev => ({ ...prev, titheEnvelopes: prev.titheEnvelopes.filter((_, i) => i !== idx) }));
     };
 
-    const handleEdit = (item) => {
-        setForm({
-            ...initialForm,
-            ...item,
-            titheEnvelopes: item.titheEnvelopes || []
-        });
-        setIsModalOpen(true);
-    };
-
-    const handleDelete = async () => {
-        if(!confirm(`¿Eliminar ${selectedIds.length} registros?`)) return;
-        const batch = window.db.batch();
-        selectedIds.forEach(id => batch.delete(window.db.collection('finances').doc(id)));
-        await batch.commit();
-        setSelectedIds([]);
-        Utils.notify("Eliminados");
-    };
-
-    // --- PDF EXPORT ---
     const handleExportPDF = (item) => {
         setPdfData(item);
         setTimeout(async () => {
@@ -490,11 +486,11 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         }, 500);
     };
 
-    // --- RENDERIZADO VISUAL ---
+    // --- RENDER ---
     
     // 1. PANTALLA DE BLOQUEO (Con botón de volver)
     if (isLocked) return (
-        <div onClick={handleBackgroundClick} className="fixed inset-0 z-[100] flex items-center justify-center bg-[#020617] animate-enter cursor-pointer">
+        <div onClick={handleBackgroundClick} className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050511] animate-enter cursor-pointer">
             {/* Botón de Emergencia para Salir */}
             <button onClick={() => setMainTab && setMainTab('dashboard')} className="absolute top-6 left-6 text-slate-400 flex items-center gap-2 hover:text-white transition-colors z-50">
                 <Icon name="ChevronLeft"/> Volver al Inicio
@@ -504,7 +500,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                 <div className={`bg-indigo-500 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-lg transition-all ${errorPin ? 'animate-shake bg-red-500' : ''}`}>
                     <Icon name={errorPin ? "AlertCircle" : "Lock"} size={28}/>
                 </div>
-                <h2 className="text-2xl font-black text-white mb-2">Finanzas</h2>
+                <h2 className="text-2xl font-black text-white mb-2">Tesoreria</h2>
                 <p className="text-slate-400 text-sm mb-6">Ingresa PIN (2367)</p>
                 
                 <input ref={pinInputRef} type="number" className="opacity-0 absolute top-0 left-0 w-full h-full" value={pinInput} onChange={e => setPinInput(e.target.value.slice(0,4))} onBlur={() => setTimeout(() => pinInputRef.current?.focus(), 100)}/>
@@ -537,7 +533,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                     <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto bg-white/5 p-1.5 rounded-2xl border border-white/10 backdrop-blur-md">
                         <div className="text-slate-300 px-2"><DateFilter currentDate={currentDate} onChange={setCurrentDate} /></div>
                         <div className="w-px h-6 bg-white/10 mx-1"></div>
-                        {['dashboard','stats','list','goals','tithers'].map(t => (
+                        {['dashboard','stats','list','tithers','funds'].map(t => (
                             <button key={t} onClick={()=>setTabView(t)} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all relative overflow-hidden ${tabView===t?'text-white shadow-lg':'text-slate-400 hover:text-white hover:bg-white/5'}`}>
                                 {tabView===t && <div className="absolute inset-0 bg-indigo-600 opacity-80"></div>}
                                 <span className="relative z-10 capitalize">{t === 'dashboard' ? 'Resumen' : t === 'stats' ? 'Gráficos' : t === 'list' ? 'Movimientos' : t === 'tithers' ? 'Diezmantes' : 'Fondos'}</span>
@@ -553,10 +549,10 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                         <div className="lg:col-span-2 bg-gradient-to-br from-indigo-900 to-[#0f172a] rounded-[32px] p-8 relative overflow-hidden shadow-2xl border border-white/10">
                             <div className="relative z-10">
                                 <span className="text-indigo-200 text-xs font-bold uppercase tracking-widest border border-indigo-500/30 px-3 py-1 rounded-full bg-indigo-500/10">Balance Total</span>
-                                <h3 className={`text-5xl sm:text-6xl font-black text-white mt-4 mb-2 tracking-tight ${blurClass}`}>{showBalance ? formatCurrency(globalBalances.total) : '$ •••••••'}</h3>
+                                <h3 className={`text-5xl sm:text-6xl font-black text-white mt-4 mb-2 tracking-tight ${blurClass}`}>{showBalance ? formatCurrency(balances.total) : '$ •••••••'}</h3>
                                 <div className="grid grid-cols-2 gap-4 mt-8">
-                                    <div className="bg-white/5 p-4 rounded-2xl border border-white/5"><div className="flex items-center gap-2 mb-2 text-emerald-400"><Icon name="DollarSign" size={16}/> <span className="text-xs font-bold uppercase">Caja</span></div><span className={`text-xl font-bold text-white ${blurClass}`}>{showBalance ? formatCurrency(globalBalances.cash) : '••••'}</span></div>
-                                    <div className="bg-white/5 p-4 rounded-2xl border border-white/5"><div className="flex items-center gap-2 mb-2 text-blue-400"><Icon name="CreditCard" size={16}/> <span className="text-xs font-bold uppercase">Banco</span></div><span className={`text-xl font-bold text-white ${blurClass}`}>{showBalance ? formatCurrency(globalBalances.bank) : '••••'}</span></div>
+                                    <div className="bg-white/5 p-4 rounded-2xl border border-white/5"><div className="flex items-center gap-2 mb-2 text-emerald-400"><Icon name="DollarSign" size={16}/> <span className="text-xs font-bold uppercase">Caja</span></div><span className={`text-xl font-bold text-white ${blurClass}`}>{showBalance ? formatCurrency(balances.cash) : '••••'}</span></div>
+                                    <div className="bg-white/5 p-4 rounded-2xl border border-white/5"><div className="flex items-center gap-2 mb-2 text-blue-400"><Icon name="CreditCard" size={16}/> <span className="text-xs font-bold uppercase">Banco</span></div><span className={`text-xl font-bold text-white ${blurClass}`}>{showBalance ? formatCurrency(balances.bank) : '••••'}</span></div>
                                 </div>
                             </div>
                         </div>
