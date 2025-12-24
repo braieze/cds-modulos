@@ -204,7 +204,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         if (form.type === 'Culto') {
             // 1. Sumar Sobres
             const envelopesTotal = form.titheEnvelopes.reduce((acc, curr) => acc + safeNum(curr.amount), 0);
-            // 2. Sumar Ofrendas (Corrección de Bug)
+            // 2. Sumar Ofrendas (Corrección de Bug: ahora suma ambos)
             const offCash = safeNum(form.offeringsCash);
             const offTrans = safeNum(form.offeringsTransfer);
             
@@ -218,7 +218,6 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             payload.method = 'Mixto'; 
         
         } else if (form.type === 'Transferencia') {
-            // Lógica de movimiento de fondos
             totalAmount = safeNum(form.amount);
             if (!form.toFund) return Utils.notify("Selecciona destino", "error");
             payload.category = `Transferencia: ${form.fromFund} -> ${form.toFund}`;
@@ -235,6 +234,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
 
         try {
             if (form.id) {
+                // AQUÍ OCURRÍA EL ERROR ANTES: updateData debe venir de props
                 await updateData('finances', form.id, payload);
             } else {
                 await addData('finances', payload);
@@ -244,7 +244,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             Utils.notify("Operación Guardada");
         } catch (e) {
             console.error(e);
-            Utils.notify("Error al guardar", "error");
+            Utils.notify("Error al guardar: " + e.message, "error");
         }
     };
 
@@ -262,7 +262,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     if (isLocked) return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#020617] animate-enter">
             {/* Botón Volver de Emergencia */}
-            <button onClick={() => setMainTab && setMainTab('dashboard')} className="absolute top-6 left-6 text-slate-400 flex items-center gap-2 hover:text-white transition-colors">
+            <button onClick={() => setMainTab && setMainTab('dashboard')} className="absolute top-6 left-6 text-slate-400 flex items-center gap-2 hover:text-white transition-colors cursor-pointer z-50">
                 <Icon name="ChevronLeft"/> Volver al Inicio
             </button>
 
