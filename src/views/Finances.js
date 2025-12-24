@@ -8,19 +8,17 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
 
     // --- ESTADOS PRINCIPALES ---
     const [currentDate, setCurrentDate] = useState(new Date());
-    const [tabView, setTabView] = useState('dashboard'); // dashboard, list, stats, tithers, funds
+    const [tabView, setTabView] = useState('dashboard');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     
-    // UI States (Privacidad, Buscador, Filtros)
+    // UI States
     const [showBalance, setShowBalance] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterType, setFilterType] = useState('all');
     const [expandedId, setExpandedId] = useState(null);
     const [selectedIds, setSelectedIds] = useState([]);
-    
-    // Filtro específico para la pestaña de Diezmantes
-    const [titherFilter, setTitherFilter] = useState('month'); // 'month', 'year', 'all'
+    const [titherFilter, setTitherFilter] = useState('month'); 
 
     // SEGURIDAD PIN (CLAVE 2367)
     const [isLocked, setIsLocked] = useState(true);
@@ -28,39 +26,28 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     const [errorPin, setErrorPin] = useState(false);
     const pinInputRef = useRef(null);
 
-    // --- FORMULARIO DE OPERACIONES ---
+    // --- DEFINICIÓN DE FUNCIONES PREVIAS ---
+    const handleBackgroundClick = () => {
+        if (isLocked && pinInputRef.current) pinInputRef.current.focus();
+    };
+
+    const handleVirtualKey = (n) => {
+        setPinInput(prev => (prev + n).slice(0, 4));
+        pinInputRef.current?.focus();
+    };
+
+    // --- FORMULARIO ---
     const initialForm = { 
-        id: null,
-        type: 'Culto', 
-        date: Utils.getLocalDate(), 
-        
-        // CULTO - DETALLE ESPECÍFICO
-        offeringsCash: '', 
-        offeringsTransfer: '',
-        titheEnvelopes: [], // Array de { id, family, amount, prayer, method }
-        
-        // OTROS (GASTOS/INGRESOS VARIOS)
-        amount: '', 
-        category: 'General', 
-        method: 'Efectivo', 
-        notes: '', 
-        attachmentUrl: '',
-        
-        // CONFIGURACIÓN EXTRA
-        isRecurring: false, 
-        allocateToGoalId: '', 
-        allocationAmount: '',
-        
-        // TRANSFERENCIA
-        fromFund: 'General',
-        toFund: ''
+        id: null, type: 'Culto', date: Utils.getLocalDate(), 
+        offeringsCash: '', offeringsTransfer: '', titheEnvelopes: [], 
+        amount: '', category: 'General', method: 'Efectivo', notes: '', 
+        attachmentUrl: '', isRecurring: false, allocateToGoalId: '', 
+        allocationAmount: '', fromFund: 'General', toFund: ''
     };
     const [form, setForm] = useState(initialForm);
-
-    // Estado temporal para agregar un sobre individualmente en el modal
     const [tempEnvelope, setTempEnvelope] = useState({ family: '', amount: '', prayer: '', method: 'Efectivo' });
 
-    // --- FONDOS / METAS (Simulados con persistencia local) ---
+    // FONDOS
     const [funds, setFunds] = useState(() => {
         const saved = localStorage.getItem('church_funds_v1');
         return saved ? JSON.parse(saved) : [{ id: 'general', name: 'Caja General', balance: 0, icon: 'Wallet', color: 'bg-indigo-500', type: 'saving' }];
@@ -68,24 +55,14 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
     const [goalForm, setGoalForm] = useState({ id: null, label: '', category: '', amount: '', type: 'saving', currentSaved: 0 });
 
-    useEffect(() => {
-        localStorage.setItem('church_funds_v1', JSON.stringify(funds));
-    }, [funds]);
+    useEffect(() => { localStorage.setItem('church_funds_v1', JSON.stringify(funds)); }, [funds]);
 
-    // --- REFERENCIAS PARA GRÁFICOS Y PDF ---
+    // REFERENCIAS
     const printRef = useRef(null);
     const [pdfData, setPdfData] = useState(null);
-    
-    // Referencias para Chart.js
-    const chartRefs = { 
-        projection: useRef(null), 
-        breakdown: useRef(null), 
-        daily: useRef(null), 
-        trend: useRef(null) 
-    };
+    const chartRefs = { projection: useRef(null), breakdown: useRef(null), daily: useRef(null), trend: useRef(null) };
     const chartInstances = useRef({});
 
-    // Categorías del sistema
     const categories = [
         { value: 'General', label: 'General / Varios', icon: 'Info', color: '#94a3b8' },
         { value: 'Mantenimiento', label: 'Infraestructura', icon: 'Briefcase', color: '#f59e0b' },
@@ -98,19 +75,16 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         { value: 'Ofrendas', label: 'Ofrendas (Ingreso)', icon: 'Gift', color: '#8b5cf6' }
     ];
 
-    // --- HELPERS Y CÁLCULOS ---
     const safeNum = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
     const blurClass = showBalance ? '' : 'filter blur-md select-none transition-all duration-500';
-
-    // Normalizador de Familias (Gomez Salcedo === Salcedo Gomez)
+    
     const normalizeFamilyName = (name) => {
         if(!name) return 'Anónimo';
-        // Quitar "Flia", "Familia", espacios extra y ordenar palabras alfabéticamente
         const clean = name.toLowerCase().replace(/flia\.?|familia/g, '').trim();
         return clean.split(/\s+/).sort().join(' ');
     };
 
-    // 1. Datos del Mes (Filtrados)
+    // DATOS FILTRADOS
     const monthlyData = useMemo(() => {
         if (!finances) return [];
         const m = currentDate.toISOString().slice(0, 7);
@@ -129,33 +103,23 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             .sort((a,b) => new Date(b.date) - new Date(a.date));
     }, [finances, currentDate, searchTerm, filterType]);
 
-    // 2. Totales Mensuales y Diezmo Nacional (10%)
-    // UNIFICADO: Usamos 'stats' para todo
+    // TOTALES
     const stats = useMemo(() => {
         let incomes = 0, expenses = 0;
-        
         monthlyData.forEach(f => {
             const val = safeNum(f.total || f.amount);
-            if (val > 0) {
-                incomes += val;
-            } else {
-                expenses += Math.abs(val);
-            }
+            if (val > 0) incomes += val; else expenses += Math.abs(val);
         });
-
-        // Diezmo para Asamblea (10% de los ingresos brutos)
         const nationalTithe = incomes * 0.10;
-
         return { incomes, expenses, net: incomes - expenses, nationalTithe };
     }, [monthlyData]);
 
-    // 3. Saldos Globales (Caja vs Banco)
+    // BALANCES
     const balances = useMemo(() => {
         let cash = 0, bank = 0;
         if (finances) {
             finances.forEach(f => {
                 if (f.type === 'Culto') {
-                    // Sumar sobres (normalmente efectivo) + ofrenda efectivo
                     let envelopesTotal = (f.titheEnvelopes || []).reduce((acc, curr) => acc + safeNum(curr.amount), 0);
                     cash += envelopesTotal + safeNum(f.offeringsCash);
                     bank += safeNum(f.offeringsTransfer);
@@ -168,7 +132,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         return { cash, bank, total: cash + bank };
     }, [finances]);
 
-    // 4. Análisis de Diezmadores (Histórico Global)
+    // DIEZMANTES
     const tithersAnalysis = useMemo(() => {
         const map = {};
         const now = new Date();
@@ -177,29 +141,16 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
 
         (finances || []).forEach(f => {
             if (f.type === 'Culto' && f.titheEnvelopes) {
-                // Aplicar Filtro de Tiempo para el análisis
                 if (titherFilter === 'month' && !f.date.startsWith(currentMonth)) return;
                 if (titherFilter === 'year' && new Date(f.date).getFullYear() !== currentYear) return;
 
                 f.titheEnvelopes.forEach(env => {
                     const rawName = env.family || 'Anónimo';
                     const key = normalizeFamilyName(rawName);
-                    
-                    if (!map[key]) map[key] = { 
-                        id: key, 
-                        displayName: rawName, // Guardamos el nombre visual
-                        total: 0, 
-                        count: 0, 
-                        lastDate: f.date, 
-                        requests: [] 
-                    };
-                    
+                    if (!map[key]) map[key] = { id: key, displayName: rawName, total: 0, count: 0, lastDate: f.date, requests: [] };
                     map[key].total += safeNum(env.amount);
                     map[key].count += 1;
-                    if (f.date > map[key].lastDate) {
-                        map[key].lastDate = f.date;
-                        map[key].displayName = rawName; // Actualizar nombre al más reciente
-                    }
+                    if (f.date > map[key].lastDate) { map[key].lastDate = f.date; map[key].displayName = rawName; }
                     if (env.prayer) map[key].requests.push({ date: f.date, text: env.prayer });
                 });
             }
@@ -207,160 +158,100 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         return Object.values(map).sort((a,b) => b.total - a.total);
     }, [finances, titherFilter]);
 
-    // 5. Datos para Gráficos (Chart.js)
+    // GRÁFICOS
     const chartData = useMemo(() => {
         if (!finances) return null;
-        
-        // A. Torta (Categorías)
         const pieMap = {};
         monthlyData.filter(f => safeNum(f.total||f.amount) < 0).forEach(f => {
             const c = f.category || 'General';
             pieMap[c] = (pieMap[c] || 0) + Math.abs(safeNum(f.total||f.amount));
         });
-        
-        // B. Barras (Diario)
         const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
         const dailyLabels = Array.from({length: daysInMonth}, (_, i) => i + 1);
         const dailyIncome = new Array(daysInMonth).fill(0);
         const dailyExpense = new Array(daysInMonth).fill(0);
-        
         monthlyData.forEach(f => {
             const d = parseInt(f.date.slice(8, 10)) - 1;
             const val = safeNum(f.total || f.amount);
-            if(d >= 0 && d < daysInMonth) {
-                if(val > 0) dailyIncome[d] += val; else dailyExpense[d] += Math.abs(val);
-            }
+            if(d >= 0 && d < daysInMonth) { if(val > 0) dailyIncome[d] += val; else dailyExpense[d] += Math.abs(val); }
         });
-
-        // C. Proyección Lineal
-        const cumulative = [];
-        let runningTotal = 0;
-        [...monthlyData].sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(f => {
-             runningTotal += safeNum(f.total || f.amount);
-             cumulative.push(runningTotal);
-        });
-        const today = new Date();
-        let projection = null;
+        const cumulative = []; let runningTotal = 0;
+        [...monthlyData].sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(f => { runningTotal += safeNum(f.total || f.amount); cumulative.push(runningTotal); });
+        const today = new Date(); let projection = null;
         if (today.getMonth() === currentDate.getMonth() && cumulative.length > 0) {
-            const daysPassed = today.getDate();
-            const avgDaily = runningTotal / daysPassed;
-            // Aquí referenciamos 'end' que se usará en el useEffect
+            const daysPassed = today.getDate(); const avgDaily = runningTotal / daysPassed;
             projection = { current: runningTotal, end: runningTotal + (avgDaily * (daysInMonth - daysPassed)) };
         }
-
-        return { 
-            pie: { labels: Object.keys(pieMap), data: Object.values(pieMap) }, 
-            daily: { labels: dailyLabels, income: dailyIncome, expense: dailyExpense }, 
-            projection 
-        };
+        return { pie: { labels: Object.keys(pieMap), data: Object.values(pieMap) }, daily: { labels: dailyLabels, income: dailyIncome, expense: dailyExpense }, projection };
     }, [monthlyData, currentDate, finances]);
 
-    // --- EFECTOS (CHARTS) ---
     useEffect(() => {
         const Chart = window.Chart;
         if ((tabView !== 'stats' && tabView !== 'dashboard') || !Chart || !chartData) return;
-        
-        Chart.defaults.color = '#94a3b8'; 
-        Chart.defaults.borderColor = 'rgba(255,255,255,0.05)';
-        
-        // Limpiar instancias previas
+        Chart.defaults.color = '#94a3b8'; Chart.defaults.borderColor = 'rgba(255,255,255,0.05)';
         Object.values(chartInstances.current).forEach(c => c && c.destroy());
 
-        // 1. Gráfico de Proyección (Stats)
         if (chartRefs.projection.current && tabView === 'stats') {
             const ctx = chartRefs.projection.current.getContext('2d');
             const gradient = ctx.createLinearGradient(0, 0, 0, 400);
             gradient.addColorStop(0, 'rgba(99, 102, 241, 0.5)'); gradient.addColorStop(1, 'rgba(99, 102, 241, 0.0)');
-            
             chartInstances.current.projection = new Chart(chartRefs.projection.current, {
-                type: 'line', 
-                data: { 
-                    labels: ['Inicio', 'Hoy', 'Fin'], 
-                    // SOLUCIÓN: Usamos 'stats.net'
-                    datasets: [{ label: 'Proyección', data: [0, stats.net, chartData.projection?.end || stats.net], borderColor: '#818cf8', fill: true, backgroundColor: gradient }] 
-                },
+                type: 'line', data: { labels: ['Inicio', 'Hoy', 'Fin'], datasets: [{ label: 'Proyección', data: [0, stats.net, chartData.projection?.end || stats.net], borderColor: '#818cf8', fill: true, backgroundColor: gradient }] },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
             });
         }
-
-        // 2. Gráfico de Torta (Stats)
         if (chartRefs.breakdown.current && tabView === 'stats') {
             chartInstances.current.breakdown = new Chart(chartRefs.breakdown.current, {
-                type: 'doughnut', 
-                data: { labels: chartData.pie.labels, datasets: [{ data: chartData.pie.data, backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6'], borderWidth: 0 }] },
+                type: 'doughnut', data: { labels: chartData.pie.labels, datasets: [{ data: chartData.pie.data, backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6'], borderWidth: 0 }] },
                 options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'right', labels: { boxWidth: 10 } } } }
             });
         }
-
-        // 3. Gráfico Diario (Dashboard)
         const dailyRef = tabView === 'dashboard' ? chartRefs.trend : chartRefs.daily;
         if (dailyRef && dailyRef.current) {
             chartInstances.current.daily = new Chart(dailyRef.current, {
-                type: 'bar', 
-                data: { 
-                    labels: chartData.daily.labels, 
-                    datasets: [{ label: 'Ingreso', data: chartData.daily.income, backgroundColor: '#10b981', borderRadius: 4 }, { label: 'Gasto', data: chartData.daily.expense, backgroundColor: '#f43f5e', borderRadius: 4 }] 
-                },
+                type: 'bar', data: { labels: chartData.daily.labels, datasets: [{ label: 'Ingreso', data: chartData.daily.income, backgroundColor: '#10b981', borderRadius: 4 }, { label: 'Gasto', data: chartData.daily.expense, backgroundColor: '#f43f5e', borderRadius: 4 }] },
                 options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, display: false } }, plugins: { legend: { display: false } } }
             });
         }
         return () => Object.values(chartInstances.current).forEach(c => c && c.destroy());
-    }, [chartData, tabView, stats]); 
+    }, [chartData, tabView, stats]);
 
-    // --- LÓGICA DE PIN Y BLOQUEO (DEFINIDA AQUÍ PARA EVITAR ERRORES) ---
-    
-    // Función para manejar el clic fuera
-    const handleBackgroundClick = () => {
-        if (isLocked && pinInputRef.current) {
-            pinInputRef.current.focus();
-        }
-    };
+    // PIN
+    useEffect(() => { if (isLocked) setTimeout(() => pinInputRef.current?.focus(), 100); if (pinInput.length === 4) { if (pinInput === '2367') { setIsLocked(false); setErrorPin(false); } else { setErrorPin(true); Utils.notify("PIN Incorrecto", "error"); setPinInput(''); } } }, [isLocked, pinInput]);
 
-    useEffect(() => {
-        if (isLocked) setTimeout(() => pinInputRef.current?.focus(), 100);
-        if (pinInput.length === 4) {
-            if (pinInput === '2367') { 
-                setIsLocked(false); 
-                setErrorPin(false); 
-            } else { 
-                setErrorPin(true); 
-                Utils.notify("PIN Incorrecto", "error"); 
-                setPinInput(''); 
-            }
-        }
-    }, [isLocked, pinInput]);
-
-    const handleVirtualKey = (n) => {
-        setPinInput(prev => (prev + n).slice(0, 4));
-        pinInputRef.current?.focus();
-    };
-
-    // --- ACCIONES GENERALES ---
+    // --- ACCIONES DE GESTIÓN (CRUD) ---
     const toggleSelect = (id) => { if (selectedIds.includes(id)) setSelectedIds(prev => prev.filter(i => i !== id)); else setSelectedIds(prev => [...prev, id]); };
     const selectAll = () => { if (selectedIds.length === monthlyData.length) setSelectedIds([]); else setSelectedIds(monthlyData.map(d => d.id)); };
     
-    // --- BORRADO CORREGIDO ---
-    const handleDelete = async (idDirecto = null) => {
-        const itemsToDelete = idDirecto ? [idDirecto] : selectedIds;
-        if (itemsToDelete.length === 0) return;
-        
-        if(!confirm(`¿Eliminar ${itemsToDelete.length} registro(s)?`)) return;
+    // --- BORRADO INDIVIDUAL (SIMPLE Y ROBUSTO) ---
+    const handleDelete = async (id) => {
+        if (!id) return;
+        if (!confirm("¿Eliminar este registro permanentemente?")) return;
         
         try {
-            const batch = window.db.batch();
-            itemsToDelete.forEach(docId => batch.delete(window.db.collection('finances').doc(docId)));
-            await batch.commit();
-            setSelectedIds([]);
+            // Usamos la prop deleteData directamente
+            await deleteData('finances', id);
             Utils.notify("Eliminado correctamente");
-        } catch (e) { 
-            console.error(e); 
-            Utils.notify("Error al eliminar", "error"); 
+        } catch (e) {
+            console.error(e);
+            Utils.notify("Error al eliminar", "error");
         }
     };
 
-    const handleBulkDelete = () => handleDelete(); 
+    // --- BORRADO MULTIPLE (BULK) ---
+    const handleBulkDelete = async () => {
+        if(selectedIds.length === 0) return;
+        if(!confirm(`¿Eliminar ${selectedIds.length} elementos seleccionados?`)) return;
+        
+        try {
+            const batch = window.db.batch();
+            selectedIds.forEach(id => batch.delete(window.db.collection('finances').doc(id)));
+            await batch.commit();
+            setSelectedIds([]);
+            Utils.notify("Selección eliminada");
+        } catch (e) { console.error(e); Utils.notify("Error al eliminar varios", "error"); }
+    };
 
-    // --- EDICIÓN CORREGIDA ---
     const handleEdit = (item) => {
         setForm({ ...initialForm, ...item, titheEnvelopes: item.titheEnvelopes || [] });
         setIsModalOpen(true);
@@ -389,7 +280,6 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             const offC = safeNum(form.offeringsCash);
             const offT = safeNum(form.offeringsTransfer);
             totalAmount = tithesC + tithesT + offC + offT;
-            
             if (totalAmount === 0) return Utils.notify("El total no puede ser 0", "error");
             payload.tithesCash = tithesC; payload.tithesTransfer = tithesT; payload.offeringsCash = offC; payload.offeringsTransfer = offT;
             payload.total = totalAmount; payload.amount = totalAmount; payload.category = 'Culto General'; payload.method = 'Mixto'; 
@@ -436,7 +326,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         return { current, target, pct };
     };
 
-    // --- SUB-HANDLERS ---
+    // --- SOBRES ---
     const handleAddEnvelope = () => {
         if (!tempEnvelope.amount) return;
         setForm(prev => ({ ...prev, titheEnvelopes: [...prev.titheEnvelopes, { ...tempEnvelope, id: Date.now() }] }));
@@ -453,36 +343,19 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         }, 500);
     };
     // --- RENDER ---
-    
-    // 1. PANTALLA DE BLOQUEO
     if (isLocked) return (
         <div onClick={handleBackgroundClick} className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050511] animate-enter cursor-pointer">
-            <button onClick={() => setMainTab && setMainTab('dashboard')} className="absolute top-6 left-6 text-slate-400 flex items-center gap-2 hover:text-white transition-colors z-50">
-                <Icon name="ChevronLeft"/> Volver al Inicio
-            </button>
-
+            <button onClick={() => setMainTab && setMainTab('dashboard')} className="absolute top-6 left-6 text-slate-400 flex items-center gap-2 hover:text-white transition-colors z-50"><Icon name="ChevronLeft"/> Volver al Inicio</button>
             <div className="relative bg-white/5 backdrop-blur-2xl p-8 rounded-[32px] shadow-2xl border border-white/10 max-w-sm w-full text-center" onClick={e => e.stopPropagation()}>
-                <div className={`bg-indigo-500 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-lg transition-all ${errorPin ? 'animate-shake bg-red-500' : ''}`}>
-                    <Icon name={errorPin ? "AlertCircle" : "Lock"} size={28}/>
-                </div>
-                <h2 className="text-2xl font-black text-white mb-2">Tesoreria</h2>
-                <p className="text-slate-400 text-sm mb-6">Ingresa PIN (2367)</p>
-                
+                <div className={`bg-indigo-500 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-lg transition-all ${errorPin ? 'animate-shake bg-red-500' : ''}`}><Icon name={errorPin ? "AlertCircle" : "Lock"} size={28}/></div>
+                <h2 className="text-2xl font-black text-white mb-2">Tesoreria</h2><p className="text-slate-400 text-sm mb-6">Ingresa PIN (2367)</p>
                 <input ref={pinInputRef} type="number" className="opacity-0 absolute top-0 left-0 w-full h-full" value={pinInput} onChange={e => setPinInput(e.target.value.slice(0,4))} onBlur={() => setTimeout(() => pinInputRef.current?.focus(), 100)}/>
-
-                <div className="flex justify-center gap-4 mb-8">
-                    {[0, 1, 2, 3].map(i => (<div key={i} className={`w-4 h-4 rounded-full transition-all ${i < pinInput.length ? 'bg-indigo-500 scale-110 shadow-[0_0_10px_#6366f1]' : 'bg-white/10'}`}></div>))}
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                    {[1,2,3,4,5,6,7,8,9].map(n => (<button key={n} onClick={() => handleVirtualKey(n)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl border border-white/5 active:scale-95 transition-all">{n}</button>))}
-                    <div/><button onClick={() => handleVirtualKey(0)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl">0</button><button onClick={() => setPinInput(p=>p.slice(0,-1))} className="h-14 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center"><Icon name="Delete" size={20}/></button>
-                </div>
+                <div className="flex justify-center gap-4 mb-8">{[0, 1, 2, 3].map(i => (<div key={i} className={`w-4 h-4 rounded-full transition-all ${i < pinInput.length ? 'bg-indigo-500 scale-110 shadow-[0_0_10px_#6366f1]' : 'bg-white/10'}`}></div>))}</div>
+                <div className="grid grid-cols-3 gap-3">{[1,2,3,4,5,6,7,8,9].map(n => (<button key={n} onClick={() => handleVirtualKey(n)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl border border-white/5 active:scale-95 transition-all">{n}</button>))}<div/><button onClick={() => handleVirtualKey(0)} className="h-14 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xl">0</button><button onClick={() => setPinInput(p=>p.slice(0,-1))} className="h-14 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center"><Icon name="Delete" size={20}/></button></div>
             </div>
         </div>
     );
 
-    // 2. INTERFAZ PRINCIPAL
     return (
         <div className="min-h-screen bg-[#020617] text-slate-200 font-sans -m-4 sm:-m-8 pb-32 relative overflow-hidden selection:bg-indigo-500/30">
             <div className="fixed top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-indigo-600/10 blur-[150px] pointer-events-none"></div>
@@ -495,16 +368,10 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                         <div><h2 className="text-2xl font-black text-white tracking-tight">Tesoreria</h2><p className="text-slate-400 text-sm font-medium">Gestión Integral</p></div>
                         <button onClick={()=>setShowBalance(!showBalance)} className="ml-2 p-2 rounded-full hover:bg-white/5 text-slate-500 hover:text-white"><Icon name={showBalance?"Eye":"EyeOff"} size={18}/></button>
                     </div>
-                    
                     <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto bg-white/5 p-1.5 rounded-2xl border border-white/10 backdrop-blur-md">
                         <div className="text-slate-300 px-2"><DateFilter currentDate={currentDate} onChange={setCurrentDate} /></div>
                         <div className="w-px h-6 bg-white/10 mx-1"></div>
-                        {['dashboard','stats','list','tithers','funds'].map(t => (
-                            <button key={t} onClick={()=>setTabView(t)} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all relative overflow-hidden ${tabView===t?'text-white shadow-lg':'text-slate-400 hover:text-white hover:bg-white/5'}`}>
-                                {tabView===t && <div className="absolute inset-0 bg-indigo-600 opacity-80"></div>}
-                                <span className="relative z-10 capitalize">{t === 'dashboard' ? 'Resumen' : t === 'stats' ? 'Gráficos' : t === 'list' ? 'Movimientos' : t === 'tithers' ? 'Diezmantes' : 'Fondos'}</span>
-                            </button>
-                        ))}
+                        {['dashboard','stats','list','tithers','funds'].map(t => (<button key={t} onClick={()=>setTabView(t)} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all relative overflow-hidden ${tabView===t?'text-white shadow-lg':'text-slate-400 hover:text-white hover:bg-white/5'}`}>{tabView===t && <div className="absolute inset-0 bg-indigo-600 opacity-80"></div>}<span className="relative z-10 capitalize">{t === 'dashboard' ? 'Resumen' : t === 'stats' ? 'Gráficos' : t === 'list' ? 'Movimientos' : t === 'tithers' ? 'Diezmantes' : 'Fondos'}</span></button>))}
                         <button onClick={()=>{setForm({...initialForm, date: Utils.getLocalDate()}); setIsModalOpen(true)}} className="bg-white text-indigo-950 p-2 rounded-xl hover:bg-indigo-50 transition-all shadow-[0_0_15px_rgba(255,255,255,0.2)] ml-1"><Icon name="Plus" size={18}/></button>
                     </div>
                 </div>
@@ -522,15 +389,12 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                                 </div>
                             </div>
                         </div>
-                        
-                        {/* Tarjeta del 10% (Asamblea de Dios) */}
                         <div className="bg-[#1e293b]/50 backdrop-blur-md border border-white/10 rounded-[32px] p-6 relative overflow-hidden flex flex-col justify-center">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 rounded-full blur-2xl"></div>
                             <div className="flex items-center gap-2 mb-4 text-purple-400"><Icon name="TrendingUp" size={20}/><h3 className="font-bold uppercase tracking-wider text-xs">Diezmo Nacional (10%)</h3></div>
                             <h2 className={`text-4xl font-black text-white mb-4 ${blurClass}`}>{showBalance ? formatCurrency(stats.nationalTithe) : '••••'}</h2>
                             <div className="bg-purple-500/10 rounded-xl p-3 border border-purple-500/20 text-xs text-purple-200"><span className="block font-bold mb-1">Cálculo:</span>Total Ingresos ({formatCurrency(stats.incomes)}) x 10%</div>
                         </div>
-                        
                         <div className="lg:col-span-3 bg-[#0f172a]/40 backdrop-blur-md border border-white/5 rounded-[32px] p-6">
                             <h4 className="text-white font-bold mb-4 flex items-center gap-2"><Icon name="BarChart" className="text-indigo-400"/> Flujo Diario</h4>
                             <div className={`h-40 w-full ${blurClass}`}><canvas ref={chartRefs.trend}></canvas></div>
@@ -546,24 +410,27 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                     </div>
                 )}
 
-                {/* VISTA 3: LISTADO (BOTONES CORREGIDOS) */}
+                {/* VISTA 3: LISTADO (BOTÓN ELIMINAR CORREGIDO) */}
                 {tabView === 'list' && (
                     <div className="animate-enter space-y-4">
+                        {selectedIds.length > 0 && (
+                            <div className="bg-white/10 p-2 rounded-xl flex justify-between items-center mb-4">
+                                <span className="text-sm font-bold text-white px-2">{selectedIds.length} seleccionados</span>
+                                <button onClick={handleBulkDelete} className="bg-red-500 text-white px-4 py-1.5 rounded-lg text-xs font-bold flex gap-2"><Icon name="Trash" size={14}/> Borrar Selección</button>
+                            </div>
+                        )}
+                        
                         {monthlyData.length === 0 ? <div className="text-center py-20 text-slate-500">Sin movimientos.</div> : monthlyData.map((f, index) => (
                             <div key={f.id || index} className="bg-white/5 border border-white/5 hover:border-white/20 p-4 rounded-2xl flex items-center gap-4 transition-all group">
+                                <div onClick={(e)=>e.stopPropagation()}><input type="checkbox" checked={selectedIds.includes(f.id)} onChange={()=>toggleSelect(f.id)} className="w-5 h-5 rounded border-slate-600 bg-slate-800/50 checked:bg-indigo-500 cursor-pointer mr-2"/></div>
                                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0 ${f.type==='Culto'?'bg-purple-500/20 text-purple-400':(safeNum(f.amount)>0?'bg-emerald-500/20 text-emerald-400':'bg-rose-500/20 text-rose-400')}`}><Icon name={f.type==='Culto'?'Church':(safeNum(f.amount)>0?'TrendingUp':'ShoppingBag')}/></div>
                                 <div className="flex-1 min-w-0">
                                     <div className="flex justify-between"><h4 className="font-bold text-white truncate">{f.type==='Culto'?'Culto General':f.category}</h4><span className={`font-mono font-bold ${safeNum(f.amount)>0?'text-emerald-400':'text-rose-400'} ${blurClass}`}>{formatCurrency(f.amount)}</span></div>
                                     <div className="flex justify-between mt-1 text-xs text-slate-500"><span>{formatDate(f.date)} • {f.method}</span><span className="italic truncate max-w-[150px]">{f.notes}</span></div>
                                 </div>
                                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    {/* Botón Editar */}
                                     <button onClick={()=>handleEdit(f)} className="p-2 bg-white/10 rounded-lg hover:bg-white/20"><Icon name="Edit" size={16}/></button>
-                                    
-                                    {/* Botón PDF */}
                                     <button onClick={(e)=>{e.stopPropagation(); handleExportPDF(f)}} className="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg hover:bg-indigo-500/30"><Icon name="Printer" size={16}/></button>
-                                    
-                                    {/* Botón Eliminar CORREGIDO */}
                                     <button onClick={(e)=>{e.stopPropagation(); handleDelete(f.id)}} className="p-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30"><Icon name="Trash" size={16}/></button>
                                 </div>
                             </div>
@@ -629,7 +496,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
                 )}
             </div>
 
-            {/* MODAL REGISTRO */}
+            {/* MODAL REGISTRO (CON SOBRES Y OFRENDAS) */}
             <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Registrar Operación">
                 <div className="space-y-5 max-h-[75vh] overflow-y-auto pr-1 pb-4">
                     <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1 rounded-xl">
