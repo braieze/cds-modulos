@@ -345,7 +345,14 @@
                                 {activeTab === 'dashboard' && Dashboard && <Dashboard userProfile={userProfile} worship={worship} servers={servers} tasks={tasks} messages={messages} ebd={ebd} youth={youth} updateData={updateData} setActiveTab={setActiveTab} />}
                                 {activeTab === 'members' && Directory && <Directory members={members} addData={addData} updateData={updateData} deleteData={deleteData} userProfile={userProfile} setActiveTab={setActiveTab} />}
                                 {activeTab === 'worship' && Worship && <Worship worship={worship} songs={songs} members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
-                                {activeTab === 'finances' && Finances && <Finances finances={finances} addData={addData} userProfile={userProfile} />}
+                                {activeTab === 'finances' && Finances && <Finances 
+                                    finances={finances} 
+                                    addData={addData} 
+                                    updateData={updateData} // <--- ESTO FALTABA
+                                    deleteData={deleteData} // <--- ESTO FALTABA
+                                    userProfile={userProfile} 
+                                    setActiveTab={setActiveTab} // <--- ESTO ES NUEVO PARA EL BOTÓN VOLVER
+                                />}
                                 {activeTab === 'ebd' && MinistryWithTasks && <MinistryWithTasks title="Escuela Bíblica" col="ebd" filterMinistry="EBD" members={members} tasks={tasks} events={ebd} addData={addData} deleteData={deleteData} updateData={updateData} />}
                                 {activeTab === 'youth' && MinistryWithTasks && <MinistryWithTasks title="Jóvenes" col="youth" filterMinistry="Jóvenes" members={members} tasks={tasks} events={youth} addData={addData} deleteData={deleteData} updateData={updateData} />}
                                 {activeTab === 'servers' && MinistryWithTasks && <MinistryWithTasks title="Cuerpo de Servidores" col="servers" filterMinistry="Servidores" members={members} tasks={tasks} events={servers} addData={addData} deleteData={deleteData} updateData={updateData} />}
