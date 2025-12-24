@@ -130,24 +130,15 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     }, [finances, currentDate, searchTerm, filterType]);
 
     // 2. Totales Mensuales y Diezmo Nacional (10%)
-    // RENOMBRADO A 'stats' PARA UNIFICAR CRITERIOS
-    const stats = useMemo(() => {
-        let incomes = 0, expenses = 0;
-        
-        monthlyData.forEach(f => {
-            const val = safeNum(f.total || f.amount);
-            if (val > 0) {
-                incomes += val;
-            } else {
-                expenses += Math.abs(val);
-            }
-        });
-
-        // Diezmo para Asamblea (10% de los ingresos brutos)
-        const nationalTithe = incomes * 0.10;
-
-        return { incomes, expenses, net: incomes - expenses, nationalTithe };
-    }, [monthlyData]);
+        const stats = useMemo(() => {
+            let incomes = 0, expenses = 0;
+            monthlyData.forEach(f => {
+                const val = safeNum(f.total || f.amount);
+                if (val > 0) incomes += val; else expenses += Math.abs(val);
+            });
+            const nationalTithe = incomes * 0.10;
+            return { incomes, expenses, net: incomes - expenses, nationalTithe };
+        }, [monthlyData]);
 
     // 3. Saldos Globales (Caja vs Banco)
     const balances = useMemo(() => {
@@ -266,22 +257,30 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
         // Limpiar instancias previas
         Object.values(chartInstances.current).forEach(c => c && c.destroy());
 
+        
         // 1. Gráfico de Proyección (Stats)
-        if (chartRefs.projection.current && tabView === 'stats') {
-            const ctx = chartRefs.projection.current.getContext('2d');
-            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
-            gradient.addColorStop(0, 'rgba(99, 102, 241, 0.5)'); gradient.addColorStop(1, 'rgba(99, 102, 241, 0.0)');
-            
-            chartInstances.current.projection = new Chart(chartRefs.projection.current, {
-                type: 'line', 
-                data: { 
-                    labels: ['Inicio', 'Hoy', 'Fin'], 
-                    // AQUÍ ESTABA EL ERROR: 'monthTotals' no existía, ahora usamos 'stats'
-                    datasets: [{ label: 'Proyección', data: [0, stats.net, chartData.projection?.end || stats.net], borderColor: '#818cf8', fill: true, backgroundColor: gradient }] 
-                },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-            });
-        }
+                if (chartRefs.projection.current && tabView === 'stats') {
+                    const ctx = chartRefs.projection.current.getContext('2d');
+                    const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+                    gradient.addColorStop(0, 'rgba(99, 102, 241, 0.5)'); 
+                    gradient.addColorStop(1, 'rgba(99, 102, 241, 0.0)');
+                    
+                    chartInstances.current.projection = new Chart(chartRefs.projection.current, {
+                        type: 'line', 
+                        data: { 
+                            labels: ['Inicio', 'Hoy', 'Fin'], 
+                            // CORRECCIÓN AQUÍ: Usamos 'stats.net'
+                            datasets: [{ 
+                                label: 'Proyección', 
+                                data: [0, stats.net, chartData.projection?.end || stats.net], 
+                                borderColor: '#818cf8', 
+                                fill: true, 
+                                backgroundColor: gradient 
+                            }] 
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                    });
+                }
 
         // 2. Gráfico de Torta (Stats)
         if (chartRefs.breakdown.current && tabView === 'stats') {
@@ -310,6 +309,7 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     // --- LÓGICA DE PIN Y BLOQUEO (FUNCION DEFINIDA ANTES DE USAR) ---
     
     // Función para manejar el clic fuera (definida antes del return)
+    // 1. DEFINIR LA FUNCIÓN AQUÍ (Antes del return)
     const handleBackgroundClick = () => {
         if (isLocked && pinInputRef.current) {
             pinInputRef.current.focus();
@@ -319,13 +319,13 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
     useEffect(() => {
         if (isLocked) setTimeout(() => pinInputRef.current?.focus(), 100);
         if (pinInput.length === 4) {
-            if (pinInput === '2367') { // CLAVE ACTUALIZADA
-                setIsLocked(false);
-                setErrorPin(false);
-            } else {
-                setErrorPin(true);
-                Utils.notify("PIN Incorrecto", "error");
-                setPinInput('');
+            if (pinInput === '2367') { 
+                setIsLocked(false); 
+                setErrorPin(false); 
+            } else { 
+                setErrorPin(true); 
+                Utils.notify("PIN Incorrecto", "error"); 
+                setPinInput(''); 
             }
         }
     }, [isLocked, pinInput]);
@@ -358,6 +358,36 @@ window.Views.Finances = ({ finances, addData, updateData, deleteData, userProfil
             setForm(prev => ({ ...prev, attachmentUrl: result }));
             Utils.notify("Imagen adjuntada");
         } catch (error) { Utils.notify("Error imagen", "error"); } finally { setIsUploading(false); }
+    };
+
+    // ESTA ES LA FUNCIÓN QUE TE FALTA PARA BORRAR MOVIMIENTOS
+    const handleDelete = async (idDirecto = null) => {
+        // Si recibimos un ID directo (clic en el tachito), borramos ese.
+        // Si no, borramos los que estén seleccionados con el checkbox.
+        const itemsToDelete = idDirecto ? [idDirecto] : selectedIds;
+
+        if (itemsToDelete.length === 0) return;
+        
+        // Confirmación simple
+        if(!confirm(`¿Eliminar ${itemsToDelete.length} registro(s)?`)) return;
+        
+        try {
+            const batch = window.db.batch();
+            itemsToDelete.forEach(docId => {
+                // Preparamos la eliminación en la base de datos
+                const ref = window.db.collection('finances').doc(docId);
+                batch.delete(ref);
+            });
+            
+            // Ejecutamos el borrado
+            await batch.commit();
+            
+            setSelectedIds([]); // Limpiamos la selección
+            Utils.notify("Eliminado correctamente");
+        } catch (e) {
+            console.error("Error al borrar:", e);
+            Utils.notify("Error al eliminar", "error");
+        }
     };
 
     // --- SAVE LOGIC REESCRITA (OFRENDAS + SOBRES) ---
