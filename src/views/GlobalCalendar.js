@@ -16,6 +16,8 @@ window.Views.GlobalCalendar = ({ worship, youth, ebd, servers, tasks, userProfil
     // UNIFICAR TODOS LOS EVENTOS EN UNA LISTA
     const allEvents = useMemo(() => {
         let events = [];
+        
+        // Función helper para procesar listas
         const process = (list, type, color, titleKey) => {
             if (!list) return;
             list.forEach(item => {
@@ -27,18 +29,19 @@ window.Views.GlobalCalendar = ({ worship, youth, ebd, servers, tasks, userProfil
                         title: item[titleKey] || item.theme || item.type || 'Evento',
                         category: type,
                         color: color,
-                        raw: item // Guardamos el objeto original
+                        raw: item
                     });
                 }
             });
         };
 
+        // 1. Procesar eventos de la base de datos
         process(worship, 'Alabanza', 'bg-purple-100 text-purple-700 border-purple-200', 'theme');
         process(youth, 'Jóvenes', 'bg-yellow-100 text-yellow-700 border-yellow-200', 'title');
         process(ebd, 'EBD', 'bg-green-100 text-green-700 border-green-200', 'title');
         process(servers, 'Servidores', 'bg-blue-100 text-blue-700 border-blue-200', 'type');
         
-        // Agregar Tareas con fecha límite
+        // 2. Tareas
         if(tasks) {
             tasks.forEach(t => {
                 if(t.dueDate && t.status !== 'Completada') {
@@ -55,24 +58,66 @@ window.Views.GlobalCalendar = ({ worship, youth, ebd, servers, tasks, userProfil
             });
         }
 
+        // 3. LÓGICA CENA DEL SEÑOR (2º Sábado del mes)
+        // Obtenemos año y mes de la fecha que está mirando el usuario en el calendario
+        const viewYear = currentDate.getFullYear();
+        const viewMonth = currentDate.getMonth();
+
+        // Verificamos si YA EXISTE una Cena del Señor manual en este mes (para no duplicar)
+        // Buscamos en los eventos ya procesados (usualmente en 'Alabanza' o 'Servidores')
+        const hasManualSupper = events.some(e => {
+            const eDate = new Date(e.date + 'T00:00:00'); // Forzar zona horaria local
+            return eDate.getMonth() === viewMonth && 
+                   eDate.getFullYear() === viewYear && 
+                   e.title.toLowerCase().includes('cena del señor');
+        });
+
+        // Si NO hay una manual, generamos la automática el 2do sábado
+        if (!hasManualSupper) {
+            let saturdaysCount = 0;
+            let secondSaturdayDate = null;
+
+            // Buscamos el 2do sábado (caerá entre el día 8 y el 14)
+            for (let day = 1; day <= 14; day++) {
+                const d = new Date(viewYear, viewMonth, day);
+                if (d.getDay() === 6) { // 6 es Sábado
+                    saturdaysCount++;
+                    if (saturdaysCount === 2) {
+                        secondSaturdayDate = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        break;
+                    }
+                }
+            }
+
+            if (secondSaturdayDate) {
+                events.push({
+                    id: 'auto-cena',
+                    date: secondSaturdayDate,
+                    time: '19:00', // Hora por defecto sugerida
+                    title: 'Cena del Señor',
+                    category: 'Especial',
+                    color: 'bg-rose-100 text-rose-700 border-rose-200 font-bold shadow-sm',
+                    isAutomatic: true // Flag visual
+                });
+            }
+        }
+
         return events;
-    }, [worship, youth, ebd, servers, tasks]);
+    }, [worship, youth, ebd, servers, tasks, currentDate]); // Agregamos currentDate a dependencias
 
     const handleDayClick = (dateStr, hasEvents) => {
-        // Siempre permitir ver detalles si hay eventos, o crear si no hay
+        // Permitir ver detalles o crear
         if (hasEvents) {
             setSelectedEventDate(dateStr);
         } else if (['Pastor', 'Líder'].includes(userProfile.role)) {
-            // Solo líderes pueden crear desde calendario
-             setCreateModal({ date: dateStr });
-             setNewEvent({ type: 'servers', title: '', time: '19:00' });
+            setCreateModal({ date: dateStr });
+            setNewEvent({ type: 'servers', title: '', time: '19:00' });
         }
     };
 
     const handleCreate = () => {
         if (!newEvent.title) return Utils.notify("Título requerido", "error");
         
-        // Crear evento básico en la colección correspondiente
         let collection = newEvent.type;
         let payload = {
             date: createModal.date,
@@ -83,14 +128,21 @@ window.Views.GlobalCalendar = ({ worship, youth, ebd, servers, tasks, userProfil
             details: {}
         };
         
+        // Manejo especial según tipo
         if (collection === 'worship') {
-            payload.theme = newEvent.title;
+            payload.theme = newEvent.title; // Alabanza usa 'theme'
             payload.type = 'Culto';
+            delete payload.title;
+        } else if (collection === 'cena') {
+            // Si elige Cena del Señor, lo guardamos en 'worship' (o servers) pero con ese título
+            collection = 'worship';
+            payload.theme = 'Cena del Señor';
+            payload.type = 'Especial';
             delete payload.title;
         }
 
         addData(collection, payload);
-        Utils.notify("Evento creado");
+        Utils.notify("Evento creado exitosamente");
         setCreateModal(null);
     };
 
@@ -100,7 +152,6 @@ window.Views.GlobalCalendar = ({ worship, youth, ebd, servers, tasks, userProfil
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0 Domingo
     
-    // Crear array de días con espacios vacíos al inicio
     const days = [];
     for (let i = 0; i < firstDayOfMonth; i++) days.push(null);
     for (let i = 1; i <= daysInMonth; i++) days.push(i);
@@ -144,9 +195,9 @@ window.Views.GlobalCalendar = ({ worship, youth, ebd, servers, tasks, userProfil
                                     {dayEvents.length > 3 && <div className="text-[9px] text-slate-400 pl-1 font-bold">+{dayEvents.length - 3} más...</div>}
                                 </div>
 
-                                {/* Botón + invisible en hover */}
-                                {!dayEvents.length && ['Pastor','Líder'].includes(userProfile.role) && (
-                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                {/* Botón + invisible en hover para crear rápido */}
+                                {(['Pastor','Líder'].includes(userProfile.role)) && (
+                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                                         <div className="bg-brand-100 text-brand-600 p-2 rounded-full shadow-sm"><Icon name="Plus" size={16}/></div>
                                     </div>
                                 )}
@@ -156,20 +207,31 @@ window.Views.GlobalCalendar = ({ worship, youth, ebd, servers, tasks, userProfil
                 </div>
             </Card>
 
-            {/* MODAL CREAR EVENTO RÁPIDO */}
+            {/* MODAL CREAR EVENTO */}
             {createModal && (
                 <Modal isOpen={!!createModal} onClose={()=>setCreateModal(null)} title={`Evento: ${Utils.formatDate(createModal.date)}`}>
                     <div className="space-y-4">
-                        <Select label="Ministerio" value={newEvent.type} onChange={e=>setNewEvent({...newEvent, type:e.target.value})}>
+                        <Select label="Tipo de Evento" value={newEvent.type} onChange={e => {
+                            const val = e.target.value;
+                            // Si selecciona Cena, prellenamos el título
+                            setNewEvent(prev => ({
+                                ...prev, 
+                                type: val, 
+                                title: val === 'cena' ? 'Cena del Señor' : prev.title
+                            }));
+                        }}>
                             <option value="">Seleccionar...</option>
-                            <option value="servers">Servicio General</option>
-                            <option value="worship">Alabanza</option>
+                            <option value="servers">Servicio General / Reunión</option>
+                            <option value="worship">Culto de Alabanza</option>
+                            <option value="cena">🔴 Cena del Señor (Especial)</option>
                             <option value="youth">Jóvenes</option>
                             <option value="ebd">Escuela Bíblica</option>
                         </Select>
+
                         <Input label="Título" value={newEvent.title} onChange={e=>setNewEvent({...newEvent, title:e.target.value})} placeholder="Ej. Reunión Especial"/>
                         <Input type="time" label="Hora" value={newEvent.time} onChange={e=>setNewEvent({...newEvent, time:e.target.value})}/>
-                        <Button className="w-full" onClick={handleCreate}>Guardar</Button>
+                        
+                        <Button className="w-full" onClick={handleCreate}>Guardar Evento</Button>
                     </div>
                 </Modal>
             )}
@@ -184,6 +246,9 @@ window.Views.GlobalCalendar = ({ worship, youth, ebd, servers, tasks, userProfil
                     servers={servers}
                     ebd={ebd}
                     youth={youth}
+                    // Pasamos userProfile y addData por si el detalle permite editar
+                    userProfile={userProfile}
+                    addData={addData}
                 />
             )}
         </div>
