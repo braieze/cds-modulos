@@ -41,6 +41,7 @@
                     animation: {
                         'spin-slow': 'spin 8s linear infinite',
                         'shake': 'shake 0.5s cubic-bezier(.36,.07,.19,.97) both',
+                        'fade-in': 'fadeIn 0.3s ease-in forwards',
                     },
                     keyframes: {
                         shake: {
@@ -48,7 +49,8 @@
                             '20%, 80%': { transform: 'translate3d(2px, 0, 0)' },
                             '30%, 50%, 70%': { transform: 'translate3d(-4px, 0, 0)' },
                             '40%, 60%': { transform: 'translate3d(4px, 0, 0)' }
-                        }
+                        },
+                        fadeIn: { from: { opacity: 0 }, to: { opacity: 1 } }
                     }
                 }
             }
@@ -56,30 +58,19 @@
     </script>
     <style>
         body { background-color: #f1f5f9; -webkit-font-smoothing: antialiased; scroll-behavior: smooth; }
-        /* Ocultar Scrollbar pero permitir scroll */
         .hide-scroll::-webkit-scrollbar { display: none; }
         .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
-        
-        /* Animaciones Globales */
         .animate-enter { animation: enter 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; transform: translateY(10px); }
         @keyframes enter { to { opacity: 1; transform: translateY(0); } }
-        
-        .fade-in { animation: fadeIn 0.3s ease-in forwards; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-        /* Clases Utilitarias */
         .input-modern { @apply w-full bg-white border border-slate-300 text-slate-900 font-medium rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500 transition-all outline-none; }
         .label-modern { @apply block text-xs font-bold text-slate-900 uppercase tracking-wide mb-1.5 ml-1; }
-        
-        /* Estilos específicos para impresión/PDF */
         @media print { .no-print { display: none !important; } }
     </style>
 
     <script type="text/babel" src="src/Utils.js"></script>
     <script type="text/babel" src="src/DataLogic.js"></script>
-    <script type="text/babel" src="src/NotificationLogic.js"></script> 
-    
-    <script type="text/babel" src="src/views/Landing.js"></script>
+    <script type="text/babel" src="src/NotificationLogic.js"></script>
+    <script type="text/babel" src="src/Sidebar.js"></script> <script type="text/babel" src="src/views/Landing.js"></script>
     <script type="text/babel" src="src/views/GlobalCalendar.js"></script>
     <script type="text/babel" src="src/views/EventDetails.js"></script>
     <script type="text/babel" src="src/views/Dashboard.js"></script>
@@ -106,16 +97,14 @@
         window.auth = firebase.auth();
         window.googleProvider = new firebase.auth.GoogleAuthProvider();
         
-        // Service Worker para PWA y Notificaciones
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./service-worker.js')
                 .then((reg) => {
-                    console.log('SW Ok:', reg.scope);
                     try {
                         const messaging = firebase.messaging();
                         messaging.useServiceWorker(reg);
-                    } catch (e) { console.log("Messaging no soportado en este entorno."); }
+                    } catch (e) { console.log("Messaging no soportado."); }
                 })
                 .catch((err) => console.log('SW Falló:', err));
             });
@@ -131,14 +120,14 @@
         const { Icon, ToastContainer } = Utils;
         const DataLogic = window.DataLogic || {};
         const { useFirebaseListeners, addData, updateData, deleteData } = DataLogic;
-        const Views = window.Views || {};
         
-        // Desestructuración de Vistas
-        const { Landing, Dashboard, Directory, Finances, Worship, MinistryWithTasks, GlobalCalendar, Messaging, Blog, QuickActions, Visits } = Views;
+        // Vistas Globales
+        const Views = window.Views || {};
+        const Sidebar = window.Sidebar; // Importamos el Sidebar Global
 
         // --- COMPONENTE LOGIN ---
         const LoginScreen = ({ onLogin, onBack, error }) => (
-            <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 fade-in">
+            <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 animate-enter">
                 <div className="bg-white p-8 rounded-3xl shadow-soft max-w-sm w-full text-center relative border border-slate-100">
                     <button onClick={onBack} className="absolute top-4 left-4 text-slate-400 hover:text-slate-600 transition-colors"><Icon name="ChevronLeft"/></button>
                     <div className="bg-brand-600 w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white mb-6 shadow-glow">
@@ -159,18 +148,16 @@
 
         // --- APP PRINCIPAL ---
         const App = () => {
-            // Estado de Navegación
-            const [viewMode, setViewMode] = useState('landing'); // 'landing', 'login', 'system'
+            const [viewMode, setViewMode] = useState('landing');
             const [activeTab, setActiveTab] = useState('dashboard');
             const [sidebarOpen, setSidebarOpen] = useState(false);
 
-            // Estado de Usuario
             const [currentUser, setCurrentUser] = useState(null);
             const [userProfile, setUserProfile] = useState(null);
             const [loadingAuth, setLoadingAuth] = useState(true);
             const [authError, setAuthError] = useState(null);
 
-            // Estado de Datos (Colecciones)
+            // Colecciones de Datos
             const [members, setMembers] = useState([]);
             const [finances, setFinances] = useState([]);
             const [worship, setWorship] = useState([]);
@@ -181,7 +168,7 @@
             const [servers, setServers] = useState([]);
             const [messages, setMessages] = useState([]);
             const [posts, setPosts] = useState([]);
-            const [visits, setVisits] = useState([]); // Nueva colección
+            const [visits, setVisits] = useState([]);
 
             // 1. AUTENTICACIÓN
             useEffect(() => {
@@ -189,22 +176,15 @@
                     if (user) {
                         setCurrentUser(user);
                         try {
-                            // Buscar perfil en base de datos
                             const q = window.db.collection('members').where('email', '==', user.email);
                             const snapshot = await q.get();
                             
                             if (!snapshot.empty) {
-                                // Usuario Encontrado
                                 const profile = { ...snapshot.docs[0].data(), id: snapshot.docs[0].id };
                                 setUserProfile(profile);
                                 setViewMode('system');
-                                
-                                // Pedir permiso notificaciones si es posible
-                                if (window.NotificationLogic) {
-                                    window.NotificationLogic.requestPermission(profile);
-                                }
+                                if (window.NotificationLogic) window.NotificationLogic.requestPermission(profile);
                             } else {
-                                // Verificar si es el primer usuario (Admin Inicial)
                                 const checkEmpty = await window.db.collection('members').get();
                                 if(checkEmpty.empty) {
                                     const admin = { name: user.displayName, email: user.email, role: 'Pastor', ministry: 'General', photo: user.photoURL, status: 'Activo' };
@@ -212,14 +192,14 @@
                                     setUserProfile(admin);
                                     setViewMode('system');
                                 } else {
-                                    setAuthError("Tu email no está registrado. Contacta al administrador.");
+                                    setAuthError("Tu email no está registrado.");
                                     setViewMode('login');
-                                    window.auth.signOut(); // Forzar salida si no tiene permiso
+                                    window.auth.signOut();
                                 }
                             }
                         } catch(e) { 
-                            console.error(e);
-                            setAuthError("Error de conexión al verificar usuario."); 
+                            console.error(e); 
+                            setAuthError("Error de conexión."); 
                         }
                     } else {
                         setCurrentUser(null);
@@ -230,20 +210,14 @@
                 return () => unsubscribe();
             }, []);
 
-            // 2. CONEXIÓN DE DATOS OPTIMIZADA (MOTOR NUEVO)
-            // Aquí configuramos qué queremos escuchar y con qué límites
+            // 2. LISTENERS FIREBASE
             const listenersConfig = useMemo(() => ({
-                // Datos críticos (Traer todo o grandes cantidades)
                 members: setMembers,
                 songs: setSongs,
-                
-                // Datos con LÍMITES para rendimiento (Smart Queries)
-                finances: { setter: setFinances, orderBy: 'date', orderDir: 'desc', limit: 300 }, // Últimos 300 movs
-                messages: { setter: setMessages, orderBy: 'date', orderDir: 'desc', limit: 50 },  // Últimos 50 msgs
-                posts: { setter: setPosts, orderBy: 'date', orderDir: 'desc', limit: 20 },        // Últimos 20 posts
-                visits: { setter: setVisits, orderBy: 'createdAt', orderDir: 'desc', limit: 50 }, // Últimas 50 visitas
-                
-                // Eventos (Idealmente filtrar por fecha futura, por ahora traemos recientes)
+                finances: { setter: setFinances, orderBy: 'date', orderDir: 'desc', limit: 300 },
+                messages: { setter: setMessages, orderBy: 'date', orderDir: 'desc', limit: 50 },
+                posts: { setter: setPosts, orderBy: 'date', orderDir: 'desc', limit: 20 },
+                visits: { setter: setVisits, orderBy: 'createdAt', orderDir: 'desc', limit: 50 },
                 worship: { setter: setWorship, orderBy: 'date', orderDir: 'asc', limit: 50 },
                 ebd: { setter: setEbd, orderBy: 'date', orderDir: 'asc', limit: 50 },
                 youth: { setter: setYouth, orderBy: 'date', orderDir: 'asc', limit: 50 },
@@ -253,11 +227,10 @@
 
             useFirebaseListeners(userProfile, listenersConfig);
 
-            // Handlers
             const handleLogin = async () => { 
                 setAuthError(null);
                 try { await window.auth.signInWithPopup(window.googleProvider); } 
-                catch(e) { setAuthError("No se pudo conectar con Google."); } 
+                catch(e) { setAuthError("Error Google Login"); } 
             };
             
             const handleLogout = () => { 
@@ -269,72 +242,54 @@
             // RENDERIZADO
             if (loadingAuth) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="w-10 h-10 border-4 border-brand-200 border-t-brand-600 rounded-full animate-spin"></div></div>;
 
-            // MODO PÚBLICO (LANDING)
-            if (viewMode === 'landing') return <Landing onEnterSystem={() => setViewMode(currentUser ? 'system' : 'login')} />;
+            if (viewMode === 'landing') return <Views.Landing onEnterSystem={() => setViewMode(currentUser ? 'system' : 'login')} />;
             
-            // MODO LOGIN
             if (viewMode === 'login') return <LoginScreen onLogin={handleLogin} onBack={()=>setViewMode('landing')} error={authError} />;
 
-            // MODO SISTEMA (APP)
-            const NavItem = ({ id, label, icon }) => (
-                <button onClick={() => { setActiveTab(id); setSidebarOpen(false); }} 
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all mb-1 ${activeTab === id ? 'bg-brand-50 text-brand-600 shadow-sm' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`}>
-                    {Icon && <Icon name={icon} />} <span className="tracking-tight">{label}</span>
-                </button>
-            );
-
+            // MODO SISTEMA
             return (
                 <div className="flex h-screen bg-slate-50 overflow-hidden text-slate-900 font-sans">
                     {ToastContainer && <ToastContainer />}
                     
-                    {/* SIDEBAR */}
-                    {/* Reemplaza todo el bloque <aside> por esto: */}
-                    <Sidebar 
-                        activeTab={activeTab} 
-                        onTabChange={(tab) => {
-                            setActiveTab(tab);
-                            setSidebarOpen(false); // Cierra el menú en móvil al hacer click
-                        }} 
-                        isOpen={sidebarOpen} 
-                        toggleSidebar={() => setSidebarOpen(!sidebarOpen)} 
-                    />
+                    {/* SIDEBAR MODULARIZADO */}
+                    {Sidebar && (
+                        <Sidebar 
+                            activeTab={activeTab} 
+                            onTabChange={(tab) => {
+                                setActiveTab(tab);
+                                setSidebarOpen(false);
+                            }} 
+                            isOpen={sidebarOpen} 
+                            toggleSidebar={() => setSidebarOpen(!sidebarOpen)} 
+                        />
+                    )}
 
-                    {/* MAIN CONTENT */}
+                    {/* CONTENIDO PRINCIPAL */}
                     <main className="flex-1 flex flex-col h-screen overflow-hidden relative w-full bg-[#f8fafc]">
-                        {/* Mobile Header */}
+                        {/* Header Móvil */}
                         <header className="md:hidden bg-white/80 backdrop-blur p-4 flex justify-between items-center border-b border-slate-100 sticky top-0 z-20">
                             <span className="font-bold text-lg text-slate-800">Conquistadores</span>
                             <button onClick={()=>setSidebarOpen(true)} className="text-slate-600"><Icon name="Menu"/></button>
                         </header>
                         
-                        {/* Scrollable Area */}
+                        {/* Área de Vistas Dinámicas */}
                         <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 scroll-smooth">
                             <div className="max-w-6xl mx-auto h-full">
-                                {activeTab === 'dashboard' && Dashboard && <Dashboard userProfile={userProfile} worship={worship} servers={servers} tasks={tasks} messages={messages} ebd={ebd} youth={youth} updateData={updateData} setActiveTab={setActiveTab} />}
-                                {activeTab === 'members' && Directory && <Directory members={members} addData={addData} updateData={updateData} deleteData={deleteData} userProfile={userProfile} setActiveTab={setActiveTab} />}
-                                {activeTab === 'worship' && Worship && <Worship worship={worship} songs={songs} members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
-                                {activeTab === 'finances' && Finances && <Finances 
-                                    finances={finances} 
-                                    addData={addData} 
-                                    updateData={updateData} // <--- ESTO FALTABA
-                                    deleteData={deleteData} // <--- ESTO FALTABA
-                                    userProfile={userProfile} 
-                                    setActiveTab={setActiveTab} // <--- ESTO ES NUEVO PARA EL BOTÓN VOLVER
-                                />}
-                                {activeTab === 'ebd' && MinistryWithTasks && <MinistryWithTasks title="Escuela Bíblica" col="ebd" filterMinistry="EBD" members={members} tasks={tasks} events={ebd} addData={addData} deleteData={deleteData} updateData={updateData} />}
-                                {activeTab === 'youth' && MinistryWithTasks && <MinistryWithTasks title="Jóvenes" col="youth" filterMinistry="Jóvenes" members={members} tasks={tasks} events={youth} addData={addData} deleteData={deleteData} updateData={updateData} />}
-                                {activeTab === 'servers' && MinistryWithTasks && <MinistryWithTasks title="Cuerpo de Servidores" col="servers" filterMinistry="Servidores" members={members} tasks={tasks} events={servers} addData={addData} deleteData={deleteData} updateData={updateData} />}
-                                {activeTab === 'calendar' && GlobalCalendar && <GlobalCalendar worship={worship} youth={youth} ebd={ebd} servers={servers} tasks={tasks} userProfile={userProfile} addData={addData} />}
-                                {activeTab === 'messages' && Messaging && <Messaging userProfile={userProfile} />}
-                                {activeTab === 'blog' && Blog && <Blog userProfile={userProfile} addData={addData} deleteData={deleteData} updateData={updateData} />}
-                                {activeTab === 'visits' && Visits && <Visits userProfile={userProfile} />}
+                                {activeTab === 'dashboard' && Views.Dashboard && <Views.Dashboard userProfile={userProfile} worship={worship} servers={servers} tasks={tasks} messages={messages} ebd={ebd} youth={youth} updateData={updateData} setActiveTab={setActiveTab} />}
+                                {activeTab === 'directory' && Views.Directory && <Views.Directory members={members} addData={addData} updateData={updateData} deleteData={deleteData} userProfile={userProfile} setActiveTab={setActiveTab} />}
+                                {activeTab === 'finances' && Views.Finances && <Views.Finances finances={finances} addData={addData} updateData={updateData} deleteData={deleteData} userProfile={userProfile} setActiveTab={setActiveTab} />}
+                                {activeTab === 'calendar' && Views.GlobalCalendar && <Views.GlobalCalendar worship={worship} youth={youth} ebd={ebd} servers={servers} tasks={tasks} userProfile={userProfile} addData={addData} />}
+                                {activeTab === 'announcements' && Views.Announcements && <Views.Announcements userProfile={userProfile} />} 
+                                
+                                {/* Ministerios (Legacy) - Se pueden mover a QuickActions o mantener aquí */}
+                                {activeTab === 'worship' && Views.Worship && <Views.Worship worship={worship} songs={songs} members={members} addData={addData} updateData={updateData} deleteData={deleteData} />}
+                                {activeTab === 'pastoral' && Views.Visits && <Views.Visits userProfile={userProfile} />}
                             </div>
                         </div>
                     </main>
 
-                    {/* Quick Actions & Mobile Overlay */}
-                    {QuickActions && viewMode === 'system' && <QuickActions userProfile={userProfile} setActiveTab={setActiveTab} />}
-                    {sidebarOpen && <div className="fixed inset-0 bg-slate-900/50 z-30 md:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)}></div>}
+                    {/* Botón Flotante (Acciones Rápidas) */}
+                    {Views.QuickActions && viewMode === 'system' && <Views.QuickActions userProfile={userProfile} setActiveTab={setActiveTab} />}
                 </div>
             );
         };
